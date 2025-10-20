@@ -1,0 +1,44 @@
+src_cq/extract_features.py:328:1: F401 'src.train_tfidf_groupby.GroupedTfidfVectorizer' imported but unused
+src_cq/extract_features.py:331:1: C901 'extract_features_for_file' is too complex (20)
+src_cq/extract_features.py:478:1: C901 'extract_all_from_source' is too complex (12)
+src_cq/extract_features.py:633:1: C901 'args_to_config' is too complex (15)
+src_cq/extract_features.py:702:1: C901 'main' is too complex (15)
+src_cq/mock_pytorch_lm.py:31:1: F401 'numpy as np' imported but unused
+src_cq/mock_pytorch_lm.py:337:11: F541 f-string is missing placeholders
+src_cq/mock_pytorch_lm.py:401:11: F541 f-string is missing placeholders
+src_cq/mock_pytorch_lm.py:402:11: F541 f-string is missing placeholders
+src_cq/mock_pytorch_lm.py:403:11: F541 f-string is missing placeholders
+src_cq/mock_pytorch_lm.py:406:11: F541 f-string is missing placeholders
+src_cq/pipeline.py:31:1: C901 'run_pipeline' is too complex (48)
+src_cq/pipeline.py:278:33: F541 f-string is missing placeholders
+src_cq/pipeline.py:285:29: F541 f-string is missing placeholders
+src_cq/pipeline.py:1494:1: C901 'args_to_config' is too complex (22)
+src_cq/predict.py:30:1: F401 'src.train_tfidf_groupby.GroupedTfidfVectorizer' imported but unused
+src_cq/predict.py:417:1: C901 'predict_on_features' is too complex (40)
+src_cq/predict.py:771:1: C901 'predict_all_feature_sets' is too complex (15)
+src_cq/predict.py:841:25: F541 f-string is missing placeholders
+src_cq/predict.py:863:1: C901 'predict_with_text_pipeline' is too complex (33)
+src_cq/predict.py:1335:1: C901 'args_to_config' is too complex (15)
+src_cq/predict.py:1406:1: C901 'main' is too complex (19)
+src_cq/predict.py:1470:31: F541 f-string is missing placeholders
+src_cq/report.py:42:1: C901 'parse_evaluation_report' is too complex (12)
+src_cq/report.py:400:1: C901 'generate_summary_report' is too complex (16)
+src_cq/train_classifiers.py:125:1: C901 'load_features_and_labels' is too complex (12)
+src_cq/train_classifiers.py:208:1: C901 'train_classifier' is too complex (15)
+src_cq/train_classifiers.py:364:1: C901 'train_all_classifiers' is too complex (15)
+src_cq/train_classifiers.py:620:1: C901 'args_to_config' is too complex (23)
+src_cq/train_classifiers.py:721:1: C901 'main' is too complex (14)
+src_cq/train_classifiers_with_ho.py:55:1: C901 'load_features_and_labels' is too complex (12)
+src_cq/train_classifiers_with_ho.py:340:1: C901 'train_classifier_with_ho' is too complex (17)
+src_cq/train_classifiers_with_ho.py:553:1: C901 'batch_train_classifiers_with_ho' is too complex (14)
+src_cq/train_classifiers_with_ho.py:656:1: C901 'main' is too complex (13)
+src_cq/train_classifiers_with_ho.py:835:23: F541 f-string is missing placeholders
+src_cq/train_classifiers_with_ho_multifeat.py:40:1: F401 'src.config.OutputConfig' imported but unused
+src_cq/train_classifiers_with_ho_multifeat.py:222:1: C901 'compute_metric' is too complex (11)
+src_cq/train_classifiers_with_ho_multifeat.py:294:1: C901 'load_features_and_labels_from_dir' is too complex (11)
+src_cq/train_classifiers_with_ho_multifeat.py:464:1: C901 'stage1_screen_features' is too complex (22)
+src_cq/train_classifiers_with_ho_multifeat.py:655:1: C901 'stage2_optimize_top_features' is too complex (14)
+src_cq/train_tfidf.py:25:1: C901 'train_tfidf' is too complex (12)
+src_cq/train_tfidf.py:199:1: C901 'args_to_config' is too complex (17)
+src_cq/train_tfidf_groupby.py:170:1: C901 'train_grouped_tfidf' is too complex (16)
+src_cq/train_tfidf_groupby.py:410:1: C901 'args_to_config' is too complex (17)

@@ -1,0 +1,100 @@
+--- /home/b/p/cefr-classification/minimal-cefr/src/train_tfidf.py	2025-10-18 02:49:56.192116+00:00
++++ /home/b/p/cefr-classification/minimal-cefr/src/train_tfidf.py	2025-10-18 11:27:42.098200+00:00
+@@ -11,11 +11,17 @@
+ from pathlib import Path
+ from typing import Optional
+ import pandas as pd
+ from sklearn.feature_extraction.text import TfidfVectorizer
+ 
+-from src.config import GlobalConfig, ExperimentConfig, TfidfConfig, DataConfig, OutputConfig
++from src.config import (
++    GlobalConfig,
++    ExperimentConfig,
++    TfidfConfig,
++    DataConfig,
++    OutputConfig,
++)
+ 
+ 
+ def train_tfidf(config: GlobalConfig) -> Path:
+     """
+     Train TF-IDF vectorizer on features-training-data.
+@@ -43,13 +49,15 @@
+         print(f"Loading features training data: {training_file}")
+ 
+     # Load data
+     df = pd.read_csv(training_file)
+     if data_config.text_column not in df.columns:
+-        raise ValueError(f"'{data_config.text_column}' column required in {training_file}")
+-
+-    X_train = df[data_config.text_column].fillna('').astype(str)
++        raise ValueError(
++            f"'{data_config.text_column}' column required in {training_file}"
++        )
++
++    X_train = df[data_config.text_column].fillna("").astype(str)
+ 
+     # Apply filtering
+     if data_config.min_text_length > 0:
+         X_train = X_train[X_train.str.len() >= data_config.min_text_length]
+ 
+@@ -63,21 +71,21 @@
+     tfidf = TfidfVectorizer(
+         max_features=tfidf_config.max_features,
+         ngram_range=tfidf_config.ngram_range,
+         min_df=tfidf_config.min_df,
+         max_df=tfidf_config.max_df,
+-        sublinear_tf=tfidf_config.sublinear_tf
++        sublinear_tf=tfidf_config.sublinear_tf,
+     )
+     tfidf.fit(X_train)
+ 
+     # Save model to hashed directory (prevents overwrites with different TF-IDF configs)
+     output_dir = Path(exp_config.get_tfidf_model_dir(tfidf_config))
+     output_dir.mkdir(parents=True, exist_ok=True)
+ 
+     if config.output_config.save_models:
+         model_path = output_dir / "tfidf_model.pkl"
+-        with open(model_path, 'wb') as f:
++        with open(model_path, "wb") as f:
+             pickle.dump(tfidf, f)
+ 
+         if verbose:
+             print(f"\n✓ TF-IDF model saved to: {model_path}")
+             print(f"✓ Vocabulary size: {len(tfidf.vocabulary_)}")
+@@ -96,16 +104,16 @@
+             "min_df": tfidf_config.min_df,
+             "max_df": tfidf_config.max_df,
+             "sublinear_tf": tfidf_config.sublinear_tf,
+             "vocabulary_size": len(tfidf.vocabulary_),
+             "training_file": training_file.name,
+-            "training_samples": len(X_train)
++            "training_samples": len(X_train),
+         }
+ 
+         if config.output_config.save_json:
+             config_path = output_dir / "config.json"
+-            with open(config_path, 'w') as f:
++            with open(config_path, "w") as f:
+                 json.dump(model_config, f, indent=2)
+ 
+             if verbose:
+                 print(f"✓ Config saved to: {config_path}")
+ 
+@@ -114,127 +122,117 @@
+ 
+ def create_parser() -> argparse.ArgumentParser:
+     """Create argument parser for train_tfidf."""
+     parser = argparse.ArgumentParser(
+         description="Train TF-IDF Vectorizer for CEFR classification",
+-        formatter_class=argparse.RawDescriptionHelpFormatter
++        formatter_class=argparse.RawDescriptionHelpFormatter,
+     )
+ 
+     # Config loading
+     config_group = parser.add_argument_group("Configuration Loading")
+     config_method = config_group.add_mutually_exclusive_group()
+     config_method.add_argument(
+-        "-c", "--config-file",
+-        help="Path to JSON or YAML config file"
++        "-c", "--config-file", help="Path to JSON or YAML config file"
