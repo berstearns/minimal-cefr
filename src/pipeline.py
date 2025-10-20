@@ -1592,6 +1592,11 @@ For more information, see documentation in the project repository.
         action="store_true",
         help="Generate summary report after pipeline completion (saves to results_summary.md)",
     )
+    output_group.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview mode: create dummy empty files to show output structure without running actual pipeline",
+    )
 
     return parser
 
@@ -1797,10 +1802,18 @@ def main():
             print(f"\nSteps to run: {steps} ({', '.join(step_names)})")
         print()
 
-    # Run pipeline
-    success = run_pipeline(
-        config, steps, classifiers, tfidf_configs, summarize=args.summarize
-    )
+    # Run pipeline (dry run or actual)
+    if args.dry_run:
+        # Dry run mode: create dummy files
+        from src.dry_run import run_full_dry_run
+        success = run_full_dry_run(
+            config, steps, classifiers, tfidf_configs, verbose=config.output_config.verbose
+        )
+    else:
+        # Actual pipeline execution
+        success = run_pipeline(
+            config, steps, classifiers, tfidf_configs, summarize=args.summarize
+        )
     sys.exit(0 if success else 1)
 
 
