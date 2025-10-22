@@ -6,6 +6,64 @@ Orchestrates the complete CEFR classification pipeline with support for:
 - Multiple classifiers
 - Batch processing of all training/test sets
 - Pre-extracted features workflow
+- Adding new test sets to existing experiments
+
+Expected File Structure
+-----------------------
+experiment-dir/
+├── ml-training-data/
+│   └── train-data.csv              # Training data with text and CEFR labels
+├── ml-test-data/
+│   ├── test-set-1/
+│   │   └── test-set-1.csv          # Test data with text and CEFR labels
+│   ├── test-set-2/
+│   │   └── test-set-2.csv
+│   └── ...
+└── (pipeline creates below during execution)
+    ├── feature-models/
+    │   ├── tfidf/
+    │   │   ├── abc12345_tfidf/         # Hashed TF-IDF config directory
+    │   │   │   ├── tfidf_model.pkl
+    │   │   │   └── config.json
+    │   │   └── def67890_tfidf/         # Another TF-IDF config
+    │   │       ├── tfidf_model.pkl
+    │   │       └── config.json
+    │   └── classifiers/
+    │       ├── train-data_xgboost_abc12345_tfidf/
+    │       │   ├── classifier.pkl
+    │       │   ├── label_encoder.pkl
+    │       │   └── config.json
+    │       └── train-data_logistic_abc12345_tfidf/
+    │           └── ...
+    ├── features/
+    │   ├── abc12345_tfidf/             # Features from TF-IDF abc12345
+    │   │   ├── train-data/
+    │   │   │   ├── features_dense.csv
+    │   │   │   └── feature_names.csv
+    │   │   ├── test-set-1/
+    │   │   │   └── ...
+    │   │   └── test-set-2/
+    │   │       └── ...
+    │   └── def67890_tfidf/             # Features from TF-IDF def67890
+    │       └── ...
+    └── results/
+        ├── train-data_xgboost_abc12345_tfidf/
+        │   ├── test-set-1/
+        │   │   ├── soft_predictions.json
+        │   │   ├── argmax_predictions.json
+        │   │   ├── rounded_avg_predictions.json
+        │   │   └── evaluation_report.md
+        │   └── test-set-2/
+        │       └── ...
+        └── train-data_logistic_abc12345_tfidf/
+            └── ...
+
+Input CSV Format
+----------------
+Both training and test CSV files must contain:
+- text_column (default: "text"): Text to classify
+- cefr_column (default: "cefr_label"): CEFR level (A1, A2, B1, B2, C1, C2)
+- label_column (default: "label"): Numeric label (optional, can be same as cefr_column)
 """
 
 import argparse
@@ -27,73 +85,203 @@ from src.predict import predict_all_feature_sets
 from src.train_classifiers import train_all_classifiers
 from src.train_tfidf import train_tfidf
 
-# Step name to number mapping
-STEP_NAMES = {
-    # Step 1: Train TF-IDF
-    "train-tfidf": 1,
-    "tfidf": 1,
-    # Step 2: Extract features
-    "extract": 2,
-    "extract-features": 2,
-    "features": 2,
-    # Step 3: Train classifiers
-    "train": 3,
-    "train-classifier": 3,
-    "train-classifiers": 3,
-    "classify": 3,
-    # Step 4: Predict
-    "predict": 4,
-    "inference": 4,
-}
 
-STEP_DESCRIPTIONS = {
-    1: "Train TF-IDF Vectorizer(s) and Extract Training Features",
-    2: "Extract Test Features for all TF-IDF configurations",
-    3: "Train ML Classifiers (all combinations)",
-    4: "Make Predictions (all combinations)",
-}
-
-
-def parse_steps(step_args: List[str]) -> List[int]:
+def add_test_set_to_experiment(
+    config: GlobalConfig,
+    test_set_path: str,
+) -> bool:
     """
-    Parse step arguments, accepting both integers and string names.
+    Add a new test set to an existing experiment.
+
+    Extracts features for the test set using all existing TF-IDF models,
+    then makes predictions using all trained classifiers.
 
     Args:
-        step_args: List of step identifiers (e.g., ["1", "2"] or ["train", "predict"])
+        config: GlobalConfig containing base configuration
+        test_set_path: Path to the new test set CSV file
 
     Returns:
-        List of step numbers (integers)
-
-    Raises:
-        ValueError: If invalid step name or number provided
+        True if successful, False otherwise
     """
-    parsed_steps = []
+    verbose = config.output_config.verbose
+    test_set_file = Path(test_set_path)
 
-    for step in step_args:
-        # Try to parse as integer first
-        try:
-            step_num = int(step)
-            if step_num not in [1, 2, 3, 4]:
-                raise ValueError(
-                    f"Invalid step number: {step_num}. Must be 1, 2, 3, or 4"
+    if not test_set_file.exists():
+        print(f"✗ Test set file not found: {test_set_path}")
+        return False
+
+    test_set_name = test_set_file.stem
+
+    if verbose:
+        print(f"\n{'='*70}")
+        print(f"ADDING NEW TEST SET: {test_set_name}")
+        print(f"{'='*70}")
+        print(f"Test set file: {test_set_path}")
+        print(f"Experiment: {config.experiment_config.experiment_dir}")
+        print(f"{'='*70}\n")
+
+    try:
+        # Step 1: Find all TF-IDF models
+        tfidf_models_dir = Path(config.experiment_config.models_dir) / "tfidf"
+        if not tfidf_models_dir.exists():
+            print(f"✗ No TF-IDF models found in {tfidf_models_dir}")
+            return False
+
+        tfidf_model_dirs = sorted([d for d in tfidf_models_dir.iterdir() if d.is_dir()])
+
+        if not tfidf_model_dirs:
+            print(f"✗ No TF-IDF model directories found in {tfidf_models_dir}")
+            return False
+
+        if verbose:
+            print(f"Found {len(tfidf_model_dirs)} TF-IDF models\n")
+
+        # Step 2: Extract features for each TF-IDF model
+        for idx, tfidf_dir in enumerate(tfidf_model_dirs, 1):
+            tfidf_hash = tfidf_dir.name
+
+            if verbose:
+                print(f"{'='*70}")
+                print(
+                    f"Extracting features ({idx}/{len(tfidf_model_dirs)}): {tfidf_hash}"
                 )
-            parsed_steps.append(step_num)
-        except ValueError:
-            # Try to parse as string name
-            step_lower = step.lower()
-            if step_lower in STEP_NAMES:
-                parsed_steps.append(STEP_NAMES[step_lower])
+                print(f"{'='*70}")
+
+            # Load TF-IDF config
+            tfidf_config_path = tfidf_dir / "config.json"
+            if not tfidf_config_path.exists():
+                print(f"  ⚠ Warning: No config found for {tfidf_hash}, skipping")
+                continue
+
+            # Create temporary directory for the new test set
+            test_data_dir = Path(config.experiment_config.ml_test_dir)
+            temp_test_dir = test_data_dir / test_set_name
+            temp_test_dir.mkdir(parents=True, exist_ok=True)
+
+            # Copy test set to temporary location with standard name
+            import shutil
+
+            temp_test_file = temp_test_dir / f"{test_set_name}.csv"
+            shutil.copy(test_set_path, temp_test_file)
+
+            # Create a temporary config with the specific TF-IDF hash
+            temp_exp_config = ExperimentConfig(
+                experiment_dir=config.experiment_config.experiment_dir,
+                pretrained_tfidf_dir=str(tfidf_dir),  # Point to specific TF-IDF model
+            )
+
+            temp_config = GlobalConfig(
+                temp_exp_config,
+                config.tfidf_config,
+                config.classifier_config,
+                config.data_config,
+                config.output_config,
+            )
+
+            if verbose:
+                print(f"  TF-IDF model: {tfidf_dir / 'tfidf_model.pkl'}")
+
+            # Extract features using this TF-IDF model
+            from src.extract_features import extract_features_for_file
+
+            features_dir = extract_features_for_file(
+                temp_config, f"{test_set_name}.csv", data_source="test"
+            )
+
+            if verbose:
+                print(f"  ✓ Features extracted to: {features_dir}\n")
+
+        # Step 3: Find all trained classifiers
+        classifiers_dir = Path(config.experiment_config.models_dir) / "classifiers"
+        if not classifiers_dir.exists():
+            print(f"✗ No classifiers found in {classifiers_dir}")
+            return False
+
+        trained_models = sorted(
+            [d.name for d in classifiers_dir.iterdir() if d.is_dir()]
+        )
+
+        if not trained_models:
+            print(f"✗ No trained models found in {classifiers_dir}")
+            return False
+
+        if verbose:
+            print(f"\n{'='*70}")
+            print("MAKING PREDICTIONS")
+            print(f"Found {len(trained_models)} trained models")
+            print(f"{'='*70}\n")
+
+        # Step 4: Predict with each model
+        for model_idx, model_name in enumerate(trained_models, 1):
+            if verbose:
+                print(f"{'='*70}")
+                print(f"Predicting ({model_idx}/{len(trained_models)}): {model_name}")
+                print(f"{'='*70}")
+
+            # Load model config to get TF-IDF hash
+            model_dir = classifiers_dir / model_name
+            model_config_path = model_dir / "config.json"
+
+            if model_config_path.exists():
+                with open(model_config_path, "r") as f:
+                    model_config_data = json.load(f)
+                tfidf_hash = model_config_data.get("tfidf_hash")
+
+                if tfidf_hash:
+                    # Use features from the corresponding TF-IDF model
+                    features_dir = (
+                        Path(config.experiment_config.features_output_dir) / tfidf_hash
+                    )
+
+                    if verbose:
+                        print(f"  TF-IDF config: {tfidf_hash}")
+                        print(f"  Features directory: {features_dir}")
+
+                    # Make predictions
+                    from src.predict import predict_on_features
+
+                    test_features_dir = features_dir / test_set_name
+                    test_labels_csv = temp_test_dir / f"{test_set_name}.csv"
+
+                    if test_features_dir.exists():
+                        features_file = str(test_features_dir / "features_dense.csv")
+
+                        predict_on_features(
+                            config=config,
+                            classifier_model_name=model_name,
+                            features_file=features_file,
+                            labels_csv=str(test_labels_csv),
+                        )
+
+                        if verbose:
+                            print("  ✓ Predictions completed\n")
+                    else:
+                        print(f"  ⚠ Warning: Features not found at {test_features_dir}")
+                else:
+                    print("  ⚠ Warning: No tfidf_hash in model config, skipping")
             else:
-                valid_names = sorted(set(STEP_NAMES.keys()))
-                raise ValueError(
-                    f"Invalid step name: '{step}'. "
-                    f"Valid names: {', '.join(valid_names)} or numbers 1-4"
-                )
+                print(f"  ⚠ Warning: No config found for {model_name}, skipping")
 
-    return sorted(list(set(parsed_steps)))
+        if verbose:
+            print(f"\n{'='*70}")
+            print("NEW TEST SET ADDED SUCCESSFULLY!")
+            print(f"{'='*70}")
+            print(f"\nResults for '{test_set_name}' saved to:")
+            results_dir = Path(config.experiment_config.results_dir)
+            print(f"  {results_dir}\n")
+
+        return True
+
+    except Exception as e:
+        print(f"\n✗ Failed to add test set: {e}")
+        if verbose:
+            import traceback
+
+            traceback.print_exc()
+        return False
 
 
-def run_pipeline(
+def run_pipeline(  # noqa: C901
     config: GlobalConfig,
     steps: Optional[List[int]] = None,
     classifiers: Optional[List[str]] = None,
@@ -263,8 +451,6 @@ def run_pipeline(
                         xgb_learning_rate=config.classifier_config.xgb_learning_rate,
                         xgb_use_gpu=config.classifier_config.xgb_use_gpu,
                         xgb_tree_method=config.classifier_config.xgb_tree_method,
-                        xgb_objective=config.classifier_config.xgb_objective,
-                        mord_alpha=config.classifier_config.mord_alpha,
                         random_state=config.classifier_config.random_state,
                     )
 
@@ -1452,6 +1638,7 @@ For more information, see documentation in the project repository.
     exp_group.add_argument(
         "-e",
         "--experiment-dir",
+        required=True,
         help="Path to experiment directory (e.g., data/experiments/zero-shot)",
     )
     exp_group.add_argument(
@@ -1465,18 +1652,13 @@ For more information, see documentation in the project repository.
     pipeline_group.add_argument(
         "--steps",
         nargs="+",
-        type=str,
-        metavar="STEP",
-        help=(
-            "Specific steps to run. Accepts step numbers (1-4) or names. "
-            "Examples: --steps extract predict  OR  --steps 2 4. "
-            "Use --list-steps to see all available step names. Default: all steps"
-        ),
+        type=int,
+        choices=[1, 2, 3, 4],
+        help="Specific steps to run (1=TF-IDF, 2=Features, 3=Classifiers, 4=Predict). Default: all steps",
     )
     pipeline_group.add_argument(
-        "--list-steps",
-        action="store_true",
-        help="List all available pipeline steps and exit",
+        "--add-test-set",
+        help="Add a new test set to existing experiment. Extracts features with all TF-IDF models and predicts with all classifiers. Provide path to CSV file.",
     )
 
     # TF-IDF configuration
@@ -1509,44 +1691,14 @@ For more information, see documentation in the project repository.
     clf_group = parser.add_argument_group("Classifier Configuration")
     clf_group.add_argument(
         "--classifier",
-        choices=[
-            "multinomialnb",
-            "logistic",
-            "randomforest",
-            "svm",
-            "xgboost",
-            "mord-lr",
-        ],
+        choices=["multinomialnb", "logistic", "randomforest", "svm", "xgboost"],
         help="Single classifier type (default: xgboost)",
     )
     clf_group.add_argument(
         "--classifiers",
         nargs="+",
-        choices=[
-            "multinomialnb",
-            "logistic",
-            "randomforest",
-            "svm",
-            "xgboost",
-            "mord-lr",
-        ],
-        help="Train multiple classifiers (e.g., xgboost logistic randomforest mord-lr)",
-    )
-    clf_group.add_argument(
-        "--xgb-objective",
-        choices=[
-            "multi:softprob",
-            "multi:softmax",
-            "reg:squarederror",
-            "reg:pseudohubererror",
-            "rank:pairwise",
-        ],
-        help="XGBoost objective function (default: multi:softprob). Use 'reg:squarederror' for ordinal regression.",
-    )
-    clf_group.add_argument(
-        "--mord-alpha",
-        type=float,
-        help="Regularization strength for mord-lr (default: 1.0)",
+        choices=["multinomialnb", "logistic", "randomforest", "svm", "xgboost"],
+        help="Train multiple classifiers (e.g., xgboost logistic randomforest)",
     )
     clf_group.add_argument("--random-state", type=int, help="Random seed (default: 42)")
     clf_group.add_argument(
@@ -1592,16 +1744,11 @@ For more information, see documentation in the project repository.
         action="store_true",
         help="Generate summary report after pipeline completion (saves to results_summary.md)",
     )
-    output_group.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Preview mode: create dummy empty files to show output structure without running actual pipeline",
-    )
 
     return parser
 
 
-def args_to_config(args: argparse.Namespace) -> GlobalConfig:
+def args_to_config(args: argparse.Namespace) -> GlobalConfig:  # noqa: C901
     """Convert argparse namespace to GlobalConfig."""
     # Check if config file or json string provided
     if args.config_file:
@@ -1647,10 +1794,6 @@ def args_to_config(args: argparse.Namespace) -> GlobalConfig:
             config.classifier_config.xgb_n_estimators = args.xgb_n_estimators
         if args.xgb_max_depth:
             config.classifier_config.xgb_max_depth = args.xgb_max_depth
-        if args.xgb_objective:
-            config.classifier_config.xgb_objective = args.xgb_objective
-        if args.mord_alpha:
-            config.classifier_config.mord_alpha = args.mord_alpha
 
         if args.text_column != "text":
             config.data_config.text_column = args.text_column
@@ -1693,8 +1836,6 @@ def args_to_config(args: argparse.Namespace) -> GlobalConfig:
             xgb_use_gpu=args.xgb_use_gpu if args.xgb_use_gpu else False,
             xgb_n_estimators=args.xgb_n_estimators or 100,
             xgb_max_depth=args.xgb_max_depth or 6,
-            xgb_objective=args.xgb_objective or "multi:softprob",
-            mord_alpha=args.mord_alpha or 1.0,
         )
 
         data_config = DataConfig(
@@ -1721,62 +1862,16 @@ def main():
     parser = create_parser()
     args = parser.parse_args()
 
-    # Handle --list-steps
-    if args.list_steps:
-        print("=" * 80)
-        print("AVAILABLE PIPELINE STEPS")
-        print("=" * 80)
-        print()
-
-        for step_num in sorted(STEP_DESCRIPTIONS.keys()):
-            print(f"Step {step_num}: {STEP_DESCRIPTIONS[step_num]}")
-
-            # Find all names for this step
-            names = [name for name, num in STEP_NAMES.items() if num == step_num]
-            print(f"  Names: {', '.join(sorted(names))}")
-            print()
-
-        print("USAGE EXAMPLES:")
-        print("-" * 80)
-        print("  # Run all steps (default)")
-        print(
-            "  python -m src.pipeline -e data/experiments/zero-shot --cefr-column cefr_level"
-        )
-        print()
-        print("  # Run specific steps by number")
-        print("  python -m src.pipeline -e data/experiments/zero-shot --steps 2 4")
-        print()
-        print("  # Run specific steps by name")
-        print(
-            "  python -m src.pipeline -e data/experiments/zero-shot --steps extract predict"
-        )
-        print()
-        print("  # Mix numbers and names")
-        print(
-            "  python -m src.pipeline -e data/experiments/zero-shot --steps 1 extract train predict"
-        )
-        print("=" * 80)
-        sys.exit(0)
-
-    # Validate required arguments
-    if not args.experiment_dir and not args.config_file and not args.config_json:
-        parser.error(
-            "the following arguments are required: -e/--experiment-dir (unless using --list-steps or -c/--config-file)"
-        )
-
     # Build configuration
     try:
         config = args_to_config(args)
     except Exception as e:
         parser.error(f"Configuration error: {e}")
 
-    # Parse steps (convert names to numbers)
-    steps = None
-    if args.steps:
-        try:
-            steps = parse_steps(args.steps)
-        except ValueError as e:
-            parser.error(str(e))
+    # Check if adding a new test set
+    if args.add_test_set:
+        success = add_test_set_to_experiment(config, args.add_test_set)
+        sys.exit(0 if success else 1)
 
     # Determine classifiers to train
     classifiers = None
@@ -1797,23 +1892,12 @@ def main():
             print(f"\nClassifiers to train: {classifiers}")
         if tfidf_configs:
             print(f"TF-IDF configurations: {tfidf_configs}")
-        if steps:
-            step_names = [STEP_DESCRIPTIONS[s] for s in steps]
-            print(f"\nSteps to run: {steps} ({', '.join(step_names)})")
         print()
 
-    # Run pipeline (dry run or actual)
-    if args.dry_run:
-        # Dry run mode: create dummy files
-        from src.dry_run import run_full_dry_run
-        success = run_full_dry_run(
-            config, steps, classifiers, tfidf_configs, verbose=config.output_config.verbose
-        )
-    else:
-        # Actual pipeline execution
-        success = run_pipeline(
-            config, steps, classifiers, tfidf_configs, summarize=args.summarize
-        )
+    # Run pipeline
+    success = run_pipeline(
+        config, args.steps, classifiers, tfidf_configs, summarize=args.summarize
+    )
     sys.exit(0 if success else 1)
 
 

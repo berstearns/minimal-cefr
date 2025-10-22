@@ -29,6 +29,13 @@ try:
 except ImportError:
     XGBOOST_AVAILABLE = False
 
+try:
+    import mord
+
+    MORD_AVAILABLE = True
+except ImportError:
+    MORD_AVAILABLE = False
+
 from src.config import (
     ClassifierConfig,
     DataConfig,
@@ -107,22 +114,53 @@ def get_classifier(config: ClassifierConfig):
                 tree_method = "hist"
             device = "cpu"
 
-        return xgb.XGBClassifier(
-            n_estimators=config.xgb_n_estimators,
-            max_depth=config.xgb_max_depth,
-            learning_rate=config.xgb_learning_rate,
-            tree_method=tree_method,
-            device=device,
-            random_state=config.random_state,
-            eval_metric="mlogloss",
-            num_class=len(CEFR_CLASSES),  # Always expect 6 CEFR classes
-        )
+        # Determine objective and eval_metric based on objective type
+        objective = config.xgb_objective
+
+        # For regression objectives, use XGBRegressor and adjust eval_metric
+        if objective.startswith("reg:"):
+            # Use regressor for ordinal regression
+            return xgb.XGBRegressor(
+                n_estimators=config.xgb_n_estimators,
+                max_depth=config.xgb_max_depth,
+                learning_rate=config.xgb_learning_rate,
+                tree_method=tree_method,
+                device=device,
+                random_state=config.random_state,
+                objective=objective,
+                eval_metric="rmse",
+            )
+        else:
+            # Classification objectives
+            eval_metric = "mlogloss" if "multi" in objective else "auc"
+            return xgb.XGBClassifier(
+                n_estimators=config.xgb_n_estimators,
+                max_depth=config.xgb_max_depth,
+                learning_rate=config.xgb_learning_rate,
+                tree_method=tree_method,
+                device=device,
+                random_state=config.random_state,
+                objective=objective,
+                eval_metric=eval_metric,
+                num_class=len(CEFR_CLASSES),  # Always expect 6 CEFR classes
+            )
+
+    elif config.classifier_type == "mord-lr":
+        if not MORD_AVAILABLE:
+            raise ImportError(
+                "Mord library is not installed. Install it with: pip install mord\n"
+                "Or use conda: conda install -c conda-forge mord"
+            )
+
+        # Use LogisticAT (All-Threshold variant) for ordinal logistic regression
+        # This is well-suited for ordinal CEFR classification
+        return mord.LogisticAT(alpha=config.mord_alpha, max_iter=1000)
 
     else:
         raise ValueError(f"Unknown classifier type: {config.classifier_type}")
 
 
-def load_features_and_labels(  # noqa: C901
+def load_features_and_labels(
     features_file: str,
     feature_names_file: Optional[str] = None,
     labels_file: Optional[str] = None,
@@ -205,7 +243,7 @@ def load_features_and_labels(  # noqa: C901
     return X_train, y_train, feature_names, y_train_series
 
 
-def train_classifier(  # noqa: C901
+def train_classifier(
     config: GlobalConfig,
     features_file: str,
     feature_names_file: Optional[str] = None,
@@ -256,13 +294,36 @@ def train_classifier(  # noqa: C901
     # Initialize classifier
     if verbose:
         print(f"\nTraining {classifier_config.classifier_type} classifier...")
+        if classifier_config.classifier_type == "xgboost":
+            print(f"  XGBoost objective: {classifier_config.xgb_objective}")
 
     clf = get_classifier(classifier_config)
-    clf.fit(X_train, y_train_encoded)
+
+    # Determine if this is an ordinal regression model (uses integer labels directly)
+    is_ordinal_regression = classifier_config.classifier_type == "mord-lr" or (
+        classifier_config.classifier_type == "xgboost"
+        and classifier_config.xgb_objective.startswith("reg:")
+    )
+
+    # Train the classifier
+    if is_ordinal_regression:
+        # Ordinal regression: use integer-encoded labels (0-5)
+        clf.fit(X_train, y_train_encoded)
+    else:
+        # Standard classification: use label-encoded values
+        clf.fit(X_train, y_train_encoded)
 
     # Evaluate on training data
     if verbose:
-        y_pred_encoded = clf.predict(X_train)
+        if is_ordinal_regression:
+            # For regression models, predictions are continuous - round to integers
+            y_pred_continuous = clf.predict(X_train)
+            y_pred_encoded = np.clip(
+                np.round(y_pred_continuous), 0, len(CEFR_CLASSES) - 1
+            ).astype(int)
+        else:
+            y_pred_encoded = clf.predict(X_train)
+
         y_pred = label_encoder.inverse_transform(y_pred_encoded)
         print("\nTraining performance:")
         print(classification_report(y_train, y_pred, zero_division=0))
@@ -284,7 +345,7 @@ def train_classifier(  # noqa: C901
                     feature_cfg = json.load(f)
                     feature_type = feature_cfg.get("feature_type", "tfidf")
                     config_hash = feature_cfg.get("config_hash")
-            except Exception:
+            except (json.JSONDecodeError, KeyError, IOError):
                 pass
 
         # Get dataset name from parent directory structure
@@ -361,7 +422,7 @@ def train_classifier(  # noqa: C901
     return model_dir
 
 
-def train_all_classifiers(  # noqa: C901
+def train_all_classifiers(
     config: GlobalConfig,
     features_dir: Optional[str] = None,
     labels_csv_dir: Optional[str] = None,
@@ -548,8 +609,15 @@ def create_parser() -> argparse.ArgumentParser:
     clf_group = parser.add_argument_group("Classifier Configuration")
     clf_group.add_argument(
         "--classifier",
-        choices=["multinomialnb", "logistic", "randomforest", "svm", "xgboost"],
-        help="Classifier type (default: multinomialnb)",
+        choices=[
+            "multinomialnb",
+            "logistic",
+            "randomforest",
+            "svm",
+            "xgboost",
+            "mord-lr",
+        ],
+        help="Classifier type (default: multinomialnb). 'mord-lr' is ordinal logistic regression",
     )
     clf_group.add_argument(
         "--logistic-max-iter",
@@ -585,6 +653,23 @@ def create_parser() -> argparse.ArgumentParser:
         choices=["auto", "gpu_hist", "hist", "exact"],
         help="Tree method for XGBoost (default: auto)",
     )
+    clf_group.add_argument(
+        "--xgb-objective",
+        choices=[
+            "multi:softprob",
+            "multi:softmax",
+            "reg:squarederror",
+            "reg:pseudohubererror",
+            "rank:pairwise",
+        ],
+        help="XGBoost objective function (default: multi:softprob). "
+        "Use 'reg:squarederror' for ordinal regression.",
+    )
+    clf_group.add_argument(
+        "--mord-alpha",
+        type=float,
+        help="Regularization strength for mord-lr (default: 1.0)",
+    )
     clf_group.add_argument("--random-state", type=int, help="Random seed (default: 42)")
 
     # Data configuration
@@ -617,7 +702,7 @@ def create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def args_to_config(args: argparse.Namespace) -> GlobalConfig:  # noqa: C901
+def args_to_config(args: argparse.Namespace) -> GlobalConfig:
     """Convert argparse namespace to GlobalConfig."""
     # Check if config file or json string provided
     if args.config_file:
@@ -656,6 +741,10 @@ def args_to_config(args: argparse.Namespace) -> GlobalConfig:  # noqa: C901
             config.classifier_config.xgb_use_gpu = args.xgb_use_gpu
         if args.xgb_tree_method:
             config.classifier_config.xgb_tree_method = args.xgb_tree_method
+        if args.xgb_objective:
+            config.classifier_config.xgb_objective = args.xgb_objective
+        if args.mord_alpha:
+            config.classifier_config.mord_alpha = args.mord_alpha
         if args.random_state:
             config.classifier_config.random_state = args.random_state
 
@@ -697,6 +786,8 @@ def args_to_config(args: argparse.Namespace) -> GlobalConfig:  # noqa: C901
             xgb_learning_rate=args.xgb_learning_rate or 0.3,
             xgb_use_gpu=args.xgb_use_gpu,
             xgb_tree_method=args.xgb_tree_method or "auto",
+            xgb_objective=args.xgb_objective or "multi:softprob",
+            mord_alpha=args.mord_alpha or 1.0,
             random_state=args.random_state or 42,
         )
 
@@ -718,7 +809,7 @@ def args_to_config(args: argparse.Namespace) -> GlobalConfig:  # noqa: C901
         )
 
 
-def main():  # noqa: C901
+def main():
     """Main entry point for classifier training."""
     parser = create_parser()
     args = parser.parse_args()

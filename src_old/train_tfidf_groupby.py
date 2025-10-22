@@ -11,20 +11,13 @@ import argparse
 import json
 import pickle
 from pathlib import Path
-from typing import Dict, List
-
-import numpy as np
+from typing import Optional, Dict, List
 import pandas as pd
-from sklearn.base import BaseEstimator, TransformerMixin
+import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.base import BaseEstimator, TransformerMixin
 
-from src.config import (
-    DataConfig,
-    ExperimentConfig,
-    GlobalConfig,
-    OutputConfig,
-    TfidfConfig,
-)
+from src.config import GlobalConfig, ExperimentConfig, TfidfConfig, DataConfig, OutputConfig
 
 
 class GroupedTfidfVectorizer(BaseEstimator, TransformerMixin):
@@ -40,7 +33,7 @@ class GroupedTfidfVectorizer(BaseEstimator, TransformerMixin):
         ngram_range: tuple = (1, 2),
         min_df: int = 2,
         max_df: float = 0.95,
-        sublinear_tf: bool = True,
+        sublinear_tf: bool = True
     ):
         self.group_column = group_column
         self.max_features = max_features
@@ -66,11 +59,9 @@ class GroupedTfidfVectorizer(BaseEstimator, TransformerMixin):
             self
         """
         if self.group_column not in X.columns:
-            raise ValueError(
-                f"Group column '{self.group_column}' not found in DataFrame"
-            )
+            raise ValueError(f"Group column '{self.group_column}' not found in DataFrame")
 
-        if "text" not in X.columns:
+        if 'text' not in X.columns:
             raise ValueError("'text' column required in DataFrame")
 
         # Get unique groups (sorted for consistency)
@@ -80,7 +71,7 @@ class GroupedTfidfVectorizer(BaseEstimator, TransformerMixin):
         for group in self.groups_:
             # Get texts for this group
             group_mask = X[self.group_column].astype(str) == group
-            group_texts = X.loc[group_mask, "text"].fillna("").astype(str)
+            group_texts = X.loc[group_mask, 'text'].fillna('').astype(str)
 
             if len(group_texts) == 0:
                 continue
@@ -91,7 +82,7 @@ class GroupedTfidfVectorizer(BaseEstimator, TransformerMixin):
                 ngram_range=self.ngram_range,
                 min_df=self.min_df,
                 max_df=self.max_df,
-                sublinear_tf=self.sublinear_tf,
+                sublinear_tf=self.sublinear_tf
             )
 
             vectorizer.fit(group_texts)
@@ -119,14 +110,14 @@ class GroupedTfidfVectorizer(BaseEstimator, TransformerMixin):
         """
         # Handle different input types
         if isinstance(X, pd.DataFrame):
-            if "text" not in X.columns:
+            if 'text' not in X.columns:
                 raise ValueError("'text' column required in DataFrame")
-            texts = X["text"].fillna("").astype(str)
+            texts = X['text'].fillna('').astype(str)
         elif isinstance(X, pd.Series):
-            texts = X.fillna("").astype(str)
+            texts = X.fillna('').astype(str)
         else:
             # Assume array-like
-            texts = pd.Series(X).fillna("").astype(str)
+            texts = pd.Series(X).fillna('').astype(str)
 
         # Transform with each group's vectorizer
         feature_matrices = []
@@ -152,12 +143,12 @@ class GroupedTfidfVectorizer(BaseEstimator, TransformerMixin):
     def get_params(self, deep=True):
         """Get parameters for this estimator."""
         return {
-            "group_column": self.group_column,
-            "max_features": self.max_features,
-            "ngram_range": self.ngram_range,
-            "min_df": self.min_df,
-            "max_df": self.max_df,
-            "sublinear_tf": self.sublinear_tf,
+            'group_column': self.group_column,
+            'max_features': self.max_features,
+            'ngram_range': self.ngram_range,
+            'min_df': self.min_df,
+            'max_df': self.max_df,
+            'sublinear_tf': self.sublinear_tf
         }
 
     def set_params(self, **params):
@@ -167,7 +158,7 @@ class GroupedTfidfVectorizer(BaseEstimator, TransformerMixin):
         return self
 
 
-def train_grouped_tfidf(config: GlobalConfig, group_column: str) -> Path:  # noqa: C901
+def train_grouped_tfidf(config: GlobalConfig, group_column: str) -> Path:
     """
     Train grouped TF-IDF vectorizer on features-training-data.
 
@@ -197,22 +188,18 @@ def train_grouped_tfidf(config: GlobalConfig, group_column: str) -> Path:  # noq
     # Load data
     df = pd.read_csv(training_file)
     if data_config.text_column not in df.columns:
-        raise ValueError(
-            f"'{data_config.text_column}' column required in {training_file}"
-        )
+        raise ValueError(f"'{data_config.text_column}' column required in {training_file}")
 
     if group_column not in df.columns:
         raise ValueError(f"Group column '{group_column}' not found in {training_file}")
 
     # Prepare DataFrame with text and group columns
     df_filtered = df[[data_config.text_column, group_column]].copy()
-    df_filtered.columns = ["text", group_column]
+    df_filtered.columns = ['text', group_column]
 
     # Apply filtering
     if data_config.min_text_length > 0:
-        df_filtered = df_filtered[
-            df_filtered["text"].fillna("").str.len() >= data_config.min_text_length
-        ]
+        df_filtered = df_filtered[df_filtered['text'].fillna('').str.len() >= data_config.min_text_length]
 
     if verbose:
         print(f"Training samples: {len(df_filtered)}")
@@ -232,7 +219,7 @@ def train_grouped_tfidf(config: GlobalConfig, group_column: str) -> Path:  # noq
         ngram_range=tfidf_config.ngram_range,
         min_df=tfidf_config.min_df,
         max_df=tfidf_config.max_df,
-        sublinear_tf=tfidf_config.sublinear_tf,
+        sublinear_tf=tfidf_config.sublinear_tf
     )
 
     grouped_tfidf.fit(df_filtered)
@@ -247,19 +234,17 @@ def train_grouped_tfidf(config: GlobalConfig, group_column: str) -> Path:  # noq
 
     if config.output_config.save_models:
         model_path = output_dir / "tfidf_model.pkl"
-        with open(model_path, "wb") as f:
+        with open(model_path, 'wb') as f:
             pickle.dump(grouped_tfidf, f)
 
         if verbose:
             print(f"\n✓ Grouped TF-IDF model saved to: {model_path}")
             print(f"✓ Number of groups: {len(grouped_tfidf.groups_)}")
             print(f"✓ Total vocabulary size: {len(grouped_tfidf.feature_names_)}")
-            print("✓ Feature dimensions per group:")
+            print(f"✓ Feature dimensions per group:")
             for group in grouped_tfidf.groups_:
                 if group in grouped_tfidf.group_vectorizers_:
-                    vocab_size = len(
-                        grouped_tfidf.group_vectorizers_[group].vocabulary_
-                    )
+                    vocab_size = len(grouped_tfidf.group_vectorizers_[group].vocabulary_)
                     print(f"    - {group}: {vocab_size} features")
             print(f"✓ Config hash: {tfidf_hash}")
             print(f"✓ Feature type: {feature_type}")
@@ -286,12 +271,12 @@ def train_grouped_tfidf(config: GlobalConfig, group_column: str) -> Path:  # noq
                 if group in grouped_tfidf.group_vectorizers_
             },
             "training_file": training_file.name,
-            "training_samples": len(df_filtered),
+            "training_samples": len(df_filtered)
         }
 
         if config.output_config.save_json:
             config_path = output_dir / "config.json"
-            with open(config_path, "w") as f:
+            with open(config_path, 'w') as f:
                 json.dump(model_config, f, indent=2)
 
             if verbose:
@@ -327,30 +312,30 @@ Examples:
 
 Note: This creates one TF-IDF model per group value and concatenates
 their features. For CEFR levels, this captures level-specific vocabulary.
-""",
+"""
     )
 
     # Config loading
     config_group = parser.add_argument_group("Configuration Loading")
     config_method = config_group.add_mutually_exclusive_group()
     config_method.add_argument(
-        "-c", "--config-file", help="Path to JSON or YAML config file"
+        "-c", "--config-file",
+        help="Path to JSON or YAML config file"
     )
     config_method.add_argument(
-        "--config-json", help="JSON string containing full configuration"
+        "--config-json",
+        help="JSON string containing full configuration"
     )
 
     # Experiment configuration
     exp_group = parser.add_argument_group("Experiment Configuration")
     exp_group.add_argument(
-        "-e",
-        "--experiment-dir",
-        help="Path to experiment directory (e.g., data/experiments/zero-shot)",
+        "-e", "--experiment-dir",
+        help="Path to experiment directory (e.g., data/experiments/zero-shot)"
     )
     exp_group.add_argument(
-        "-o",
-        "--output-dir",
-        help="Custom output directory for models (default: <experiment-dir>/feature-models)",
+        "-o", "--output-dir",
+        help="Custom output directory for models (default: <experiment-dir>/feature-models)"
     )
 
     # Grouping configuration (REQUIRED)
@@ -358,7 +343,7 @@ their features. For CEFR levels, this captures level-specific vocabulary.
     group_group.add_argument(
         "--group-by",
         required=True,
-        help="Column name to group by (e.g., 'cefr_level') - REQUIRED",
+        help="Column name to group by (e.g., 'cefr_level') - REQUIRED"
     )
 
     # TF-IDF configuration
@@ -366,22 +351,34 @@ their features. For CEFR levels, this captures level-specific vocabulary.
     tfidf_group.add_argument(
         "--max-features",
         type=int,
-        help="Maximum number of TF-IDF features per group (default: 5000)",
+        help="Maximum number of TF-IDF features per group (default: 5000)"
     )
     tfidf_group.add_argument(
-        "--ngram-min", type=int, default=1, help="Minimum n-gram size (default: 1)"
+        "--ngram-min",
+        type=int,
+        default=1,
+        help="Minimum n-gram size (default: 1)"
     )
     tfidf_group.add_argument(
-        "--ngram-max", type=int, default=2, help="Maximum n-gram size (default: 2)"
+        "--ngram-max",
+        type=int,
+        default=2,
+        help="Maximum n-gram size (default: 2)"
     )
     tfidf_group.add_argument(
-        "--min-df", type=int, help="Minimum document frequency (default: 2)"
+        "--min-df",
+        type=int,
+        help="Minimum document frequency (default: 2)"
     )
     tfidf_group.add_argument(
-        "--max-df", type=float, help="Maximum document frequency (default: 0.95)"
+        "--max-df",
+        type=float,
+        help="Maximum document frequency (default: 0.95)"
     )
     tfidf_group.add_argument(
-        "--no-sublinear-tf", action="store_true", help="Disable sublinear TF scaling"
+        "--no-sublinear-tf",
+        action="store_true",
+        help="Disable sublinear TF scaling"
     )
 
     # Data configuration
@@ -389,32 +386,38 @@ their features. For CEFR levels, this captures level-specific vocabulary.
     data_group.add_argument(
         "--text-column",
         default="text",
-        help="Column name containing text (default: text)",
+        help="Column name containing text (default: text)"
     )
     data_group.add_argument(
-        "--min-length", type=int, help="Minimum text length filter (default: 0)"
+        "--min-length",
+        type=int,
+        help="Minimum text length filter (default: 0)"
     )
 
     # Output configuration
     output_group = parser.add_argument_group("Output Configuration")
     output_group.add_argument(
-        "--no-save-config", action="store_true", help="Skip saving configuration files"
+        "--no-save-config",
+        action="store_true",
+        help="Skip saving configuration files"
     )
     output_group.add_argument(
-        "-q", "--quiet", action="store_true", help="Suppress verbose output"
+        "-q", "--quiet",
+        action="store_true",
+        help="Suppress verbose output"
     )
 
     return parser
 
 
-def args_to_config(args: argparse.Namespace) -> GlobalConfig:  # noqa: C901
+def args_to_config(args: argparse.Namespace) -> GlobalConfig:
     """Convert argparse namespace to GlobalConfig."""
     # Check if config file or json string provided
     if args.config_file:
         config_path = Path(args.config_file)
-        if config_path.suffix in [".yaml", ".yml"]:
+        if config_path.suffix in ['.yaml', '.yml']:
             config = GlobalConfig.from_yaml_file(str(config_path))
-        elif config_path.suffix == ".json":
+        elif config_path.suffix == '.json':
             config = GlobalConfig.from_json_file(str(config_path))
         else:
             raise ValueError(f"Unsupported config file format: {config_path.suffix}")
@@ -423,7 +426,7 @@ def args_to_config(args: argparse.Namespace) -> GlobalConfig:  # noqa: C901
         if args.experiment_dir:
             config.experiment_config = ExperimentConfig(
                 experiment_dir=args.experiment_dir,
-                models_dir=args.output_dir if args.output_dir else None,
+                models_dir=args.output_dir if args.output_dir else None
             )
         elif args.output_dir:
             config.experiment_config.models_dir = args.output_dir
@@ -432,16 +435,8 @@ def args_to_config(args: argparse.Namespace) -> GlobalConfig:  # noqa: C901
             config.tfidf_config.max_features = args.max_features
         if args.ngram_min or args.ngram_max:
             config.tfidf_config.ngram_range = (
-                (
-                    args.ngram_min
-                    if args.ngram_min
-                    else config.tfidf_config.ngram_range[0]
-                ),
-                (
-                    args.ngram_max
-                    if args.ngram_max
-                    else config.tfidf_config.ngram_range[1]
-                ),
+                args.ngram_min if args.ngram_min else config.tfidf_config.ngram_range[0],
+                args.ngram_max if args.ngram_max else config.tfidf_config.ngram_range[1]
             )
         if args.min_df:
             config.tfidf_config.min_df = args.min_df
@@ -473,7 +468,7 @@ def args_to_config(args: argparse.Namespace) -> GlobalConfig:  # noqa: C901
         # Build config from CLI args
         experiment_config = ExperimentConfig(
             experiment_dir=args.experiment_dir or "data/experiments/zero-shot",
-            models_dir=args.output_dir if args.output_dir else None,
+            models_dir=args.output_dir if args.output_dir else None
         )
 
         tfidf_config = TfidfConfig(
@@ -481,23 +476,20 @@ def args_to_config(args: argparse.Namespace) -> GlobalConfig:  # noqa: C901
             ngram_range=(args.ngram_min, args.ngram_max),
             min_df=args.min_df or 2,
             max_df=args.max_df or 0.95,
-            sublinear_tf=not args.no_sublinear_tf,
+            sublinear_tf=not args.no_sublinear_tf
         )
 
         data_config = DataConfig(
-            text_column=args.text_column, min_text_length=args.min_length or 0
+            text_column=args.text_column,
+            min_text_length=args.min_length or 0
         )
 
         output_config = OutputConfig(
-            save_config=not args.no_save_config, verbose=not args.quiet
+            save_config=not args.no_save_config,
+            verbose=not args.quiet
         )
 
-        return GlobalConfig(
-            experiment_config,
-            tfidf_config,
-            data_config=data_config,
-            output_config=output_config,
-        )
+        return GlobalConfig(experiment_config, tfidf_config, data_config=data_config, output_config=output_config)
 
 
 def main():

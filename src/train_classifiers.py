@@ -142,7 +142,8 @@ def get_classifier(config: ClassifierConfig):
                 random_state=config.random_state,
                 objective=objective,
                 eval_metric=eval_metric,
-                num_class=len(CEFR_CLASSES),  # Always expect 6 CEFR classes
+                # num_class will be inferred from training data
+                # This allows training on datasets with missing CEFR levels
             )
 
     elif config.classifier_type == "mord-lr":
@@ -286,10 +287,35 @@ def train_classifier(
     # Encode labels for training
     y_train_encoded = label_encoder.transform(y_train)
 
+    # For XGBoost classification, we need contiguous labels starting from 0
+    # Create a mapping from CEFR-encoded labels to contiguous labels
+    xgb_label_mapping = None
+    xgb_inverse_mapping = None
+    is_xgb_classification = (
+        classifier_config.classifier_type == "xgboost"
+        and not classifier_config.xgb_objective.startswith("reg:")
+    )
+
+    if is_xgb_classification:
+        # Get unique encoded labels and create mapping to [0, 1, 2, ...]
+        unique_encoded = np.unique(y_train_encoded)
+        xgb_label_mapping = {orig: new for new, orig in enumerate(unique_encoded)}
+        xgb_inverse_mapping = {new: orig for orig, new in xgb_label_mapping.items()}
+
+        # Create remapped labels for XGBoost
+        y_train_xgb = np.array([xgb_label_mapping[label] for label in y_train_encoded])
+    else:
+        y_train_xgb = y_train_encoded
+
     if verbose:
         print("\nLabel encoding:")
         for label, encoded in zip(CEFR_CLASSES, range(len(CEFR_CLASSES))):
             print(f"  {label} → {encoded}")
+        if is_xgb_classification and xgb_label_mapping:
+            print("\nXGBoost remapping (to contiguous labels):")
+            for orig, new in sorted(xgb_label_mapping.items()):
+                cefr_label = CEFR_CLASSES[orig]
+                print(f"  {cefr_label} ({orig}) → {new}")
 
     # Initialize classifier
     if verbose:
@@ -309,6 +335,9 @@ def train_classifier(
     if is_ordinal_regression:
         # Ordinal regression: use integer-encoded labels (0-5)
         clf.fit(X_train, y_train_encoded)
+    elif is_xgb_classification:
+        # XGBoost classification: use remapped contiguous labels
+        clf.fit(X_train, y_train_xgb)
     else:
         # Standard classification: use label-encoded values
         clf.fit(X_train, y_train_encoded)
@@ -321,6 +350,12 @@ def train_classifier(
             y_pred_encoded = np.clip(
                 np.round(y_pred_continuous), 0, len(CEFR_CLASSES) - 1
             ).astype(int)
+        elif is_xgb_classification:
+            # For XGBoost classification, map predictions back to CEFR-encoded labels
+            y_pred_xgb = clf.predict(X_train)
+            y_pred_encoded = np.array(
+                [xgb_inverse_mapping[label] for label in y_pred_xgb]
+            )
         else:
             y_pred_encoded = clf.predict(X_train)
 
@@ -374,9 +409,23 @@ def train_classifier(
         with open(encoder_path, "wb") as f:
             pickle.dump(label_encoder, f)
 
+        # Save XGBoost label mapping if applicable
+        if is_xgb_classification and xgb_label_mapping:
+            xgb_mapping_path = model_dir / "xgb_label_mapping.pkl"
+            with open(xgb_mapping_path, "wb") as f:
+                pickle.dump(
+                    {
+                        "xgb_to_cefr": xgb_inverse_mapping,
+                        "cefr_to_xgb": xgb_label_mapping,
+                    },
+                    f,
+                )
+
         if verbose:
             print(f"\n✓ Classifier saved to: {model_path}")
             print(f"✓ Label encoder saved to: {encoder_path}")
+            if is_xgb_classification and xgb_label_mapping:
+                print(f"✓ XGBoost label mapping saved to: {xgb_mapping_path}")
 
     # Save config
     if config.output_config.save_config:

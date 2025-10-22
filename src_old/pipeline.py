@@ -27,8 +27,73 @@ from src.predict import predict_all_feature_sets
 from src.train_classifiers import train_all_classifiers
 from src.train_tfidf import train_tfidf
 
+# Step name to number mapping
+STEP_NAMES = {
+    # Step 1: Train TF-IDF
+    "train-tfidf": 1,
+    "tfidf": 1,
+    # Step 2: Extract features
+    "extract": 2,
+    "extract-features": 2,
+    "features": 2,
+    # Step 3: Train classifiers
+    "train": 3,
+    "train-classifier": 3,
+    "train-classifiers": 3,
+    "classify": 3,
+    # Step 4: Predict
+    "predict": 4,
+    "inference": 4,
+}
 
-def run_pipeline(  # noqa: C901
+STEP_DESCRIPTIONS = {
+    1: "Train TF-IDF Vectorizer(s) and Extract Training Features",
+    2: "Extract Test Features for all TF-IDF configurations",
+    3: "Train ML Classifiers (all combinations)",
+    4: "Make Predictions (all combinations)",
+}
+
+
+def parse_steps(step_args: List[str]) -> List[int]:
+    """
+    Parse step arguments, accepting both integers and string names.
+
+    Args:
+        step_args: List of step identifiers (e.g., ["1", "2"] or ["train", "predict"])
+
+    Returns:
+        List of step numbers (integers)
+
+    Raises:
+        ValueError: If invalid step name or number provided
+    """
+    parsed_steps = []
+
+    for step in step_args:
+        # Try to parse as integer first
+        try:
+            step_num = int(step)
+            if step_num not in [1, 2, 3, 4]:
+                raise ValueError(
+                    f"Invalid step number: {step_num}. Must be 1, 2, 3, or 4"
+                )
+            parsed_steps.append(step_num)
+        except ValueError:
+            # Try to parse as string name
+            step_lower = step.lower()
+            if step_lower in STEP_NAMES:
+                parsed_steps.append(STEP_NAMES[step_lower])
+            else:
+                valid_names = sorted(set(STEP_NAMES.keys()))
+                raise ValueError(
+                    f"Invalid step name: '{step}'. "
+                    f"Valid names: {', '.join(valid_names)} or numbers 1-4"
+                )
+
+    return sorted(list(set(parsed_steps)))
+
+
+def run_pipeline(
     config: GlobalConfig,
     steps: Optional[List[int]] = None,
     classifiers: Optional[List[str]] = None,
@@ -198,6 +263,8 @@ def run_pipeline(  # noqa: C901
                         xgb_learning_rate=config.classifier_config.xgb_learning_rate,
                         xgb_use_gpu=config.classifier_config.xgb_use_gpu,
                         xgb_tree_method=config.classifier_config.xgb_tree_method,
+                        xgb_objective=config.classifier_config.xgb_objective,
+                        mord_alpha=config.classifier_config.mord_alpha,
                         random_state=config.classifier_config.random_state,
                     )
 
@@ -1385,7 +1452,6 @@ For more information, see documentation in the project repository.
     exp_group.add_argument(
         "-e",
         "--experiment-dir",
-        required=True,
         help="Path to experiment directory (e.g., data/experiments/zero-shot)",
     )
     exp_group.add_argument(
@@ -1399,9 +1465,18 @@ For more information, see documentation in the project repository.
     pipeline_group.add_argument(
         "--steps",
         nargs="+",
-        type=int,
-        choices=[1, 2, 3, 4],
-        help="Specific steps to run (1=TF-IDF, 2=Features, 3=Classifiers, 4=Predict). Default: all steps",
+        type=str,
+        metavar="STEP",
+        help=(
+            "Specific steps to run. Accepts step numbers (1-4) or names. "
+            "Examples: --steps extract predict  OR  --steps 2 4. "
+            "Use --list-steps to see all available step names. Default: all steps"
+        ),
+    )
+    pipeline_group.add_argument(
+        "--list-steps",
+        action="store_true",
+        help="List all available pipeline steps and exit",
     )
 
     # TF-IDF configuration
@@ -1434,14 +1509,44 @@ For more information, see documentation in the project repository.
     clf_group = parser.add_argument_group("Classifier Configuration")
     clf_group.add_argument(
         "--classifier",
-        choices=["multinomialnb", "logistic", "randomforest", "svm", "xgboost"],
+        choices=[
+            "multinomialnb",
+            "logistic",
+            "randomforest",
+            "svm",
+            "xgboost",
+            "mord-lr",
+        ],
         help="Single classifier type (default: xgboost)",
     )
     clf_group.add_argument(
         "--classifiers",
         nargs="+",
-        choices=["multinomialnb", "logistic", "randomforest", "svm", "xgboost"],
-        help="Train multiple classifiers (e.g., xgboost logistic randomforest)",
+        choices=[
+            "multinomialnb",
+            "logistic",
+            "randomforest",
+            "svm",
+            "xgboost",
+            "mord-lr",
+        ],
+        help="Train multiple classifiers (e.g., xgboost logistic randomforest mord-lr)",
+    )
+    clf_group.add_argument(
+        "--xgb-objective",
+        choices=[
+            "multi:softprob",
+            "multi:softmax",
+            "reg:squarederror",
+            "reg:pseudohubererror",
+            "rank:pairwise",
+        ],
+        help="XGBoost objective function (default: multi:softprob). Use 'reg:squarederror' for ordinal regression.",
+    )
+    clf_group.add_argument(
+        "--mord-alpha",
+        type=float,
+        help="Regularization strength for mord-lr (default: 1.0)",
     )
     clf_group.add_argument("--random-state", type=int, help="Random seed (default: 42)")
     clf_group.add_argument(
@@ -1487,11 +1592,16 @@ For more information, see documentation in the project repository.
         action="store_true",
         help="Generate summary report after pipeline completion (saves to results_summary.md)",
     )
+    output_group.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview mode: create dummy empty files to show output structure without running actual pipeline",
+    )
 
     return parser
 
 
-def args_to_config(args: argparse.Namespace) -> GlobalConfig:  # noqa: C901
+def args_to_config(args: argparse.Namespace) -> GlobalConfig:
     """Convert argparse namespace to GlobalConfig."""
     # Check if config file or json string provided
     if args.config_file:
@@ -1537,6 +1647,10 @@ def args_to_config(args: argparse.Namespace) -> GlobalConfig:  # noqa: C901
             config.classifier_config.xgb_n_estimators = args.xgb_n_estimators
         if args.xgb_max_depth:
             config.classifier_config.xgb_max_depth = args.xgb_max_depth
+        if args.xgb_objective:
+            config.classifier_config.xgb_objective = args.xgb_objective
+        if args.mord_alpha:
+            config.classifier_config.mord_alpha = args.mord_alpha
 
         if args.text_column != "text":
             config.data_config.text_column = args.text_column
@@ -1579,6 +1693,8 @@ def args_to_config(args: argparse.Namespace) -> GlobalConfig:  # noqa: C901
             xgb_use_gpu=args.xgb_use_gpu if args.xgb_use_gpu else False,
             xgb_n_estimators=args.xgb_n_estimators or 100,
             xgb_max_depth=args.xgb_max_depth or 6,
+            xgb_objective=args.xgb_objective or "multi:softprob",
+            mord_alpha=args.mord_alpha or 1.0,
         )
 
         data_config = DataConfig(
@@ -1605,11 +1721,62 @@ def main():
     parser = create_parser()
     args = parser.parse_args()
 
+    # Handle --list-steps
+    if args.list_steps:
+        print("=" * 80)
+        print("AVAILABLE PIPELINE STEPS")
+        print("=" * 80)
+        print()
+
+        for step_num in sorted(STEP_DESCRIPTIONS.keys()):
+            print(f"Step {step_num}: {STEP_DESCRIPTIONS[step_num]}")
+
+            # Find all names for this step
+            names = [name for name, num in STEP_NAMES.items() if num == step_num]
+            print(f"  Names: {', '.join(sorted(names))}")
+            print()
+
+        print("USAGE EXAMPLES:")
+        print("-" * 80)
+        print("  # Run all steps (default)")
+        print(
+            "  python -m src.pipeline -e data/experiments/zero-shot --cefr-column cefr_level"
+        )
+        print()
+        print("  # Run specific steps by number")
+        print("  python -m src.pipeline -e data/experiments/zero-shot --steps 2 4")
+        print()
+        print("  # Run specific steps by name")
+        print(
+            "  python -m src.pipeline -e data/experiments/zero-shot --steps extract predict"
+        )
+        print()
+        print("  # Mix numbers and names")
+        print(
+            "  python -m src.pipeline -e data/experiments/zero-shot --steps 1 extract train predict"
+        )
+        print("=" * 80)
+        sys.exit(0)
+
+    # Validate required arguments
+    if not args.experiment_dir and not args.config_file and not args.config_json:
+        parser.error(
+            "the following arguments are required: -e/--experiment-dir (unless using --list-steps or -c/--config-file)"
+        )
+
     # Build configuration
     try:
         config = args_to_config(args)
     except Exception as e:
         parser.error(f"Configuration error: {e}")
+
+    # Parse steps (convert names to numbers)
+    steps = None
+    if args.steps:
+        try:
+            steps = parse_steps(args.steps)
+        except ValueError as e:
+            parser.error(str(e))
 
     # Determine classifiers to train
     classifiers = None
@@ -1630,12 +1797,23 @@ def main():
             print(f"\nClassifiers to train: {classifiers}")
         if tfidf_configs:
             print(f"TF-IDF configurations: {tfidf_configs}")
+        if steps:
+            step_names = [STEP_DESCRIPTIONS[s] for s in steps]
+            print(f"\nSteps to run: {steps} ({', '.join(step_names)})")
         print()
 
-    # Run pipeline
-    success = run_pipeline(
-        config, args.steps, classifiers, tfidf_configs, summarize=args.summarize
-    )
+    # Run pipeline (dry run or actual)
+    if args.dry_run:
+        # Dry run mode: create dummy files
+        from src.dry_run import run_full_dry_run
+        success = run_full_dry_run(
+            config, steps, classifiers, tfidf_configs, verbose=config.output_config.verbose
+        )
+    else:
+        # Actual pipeline execution
+        success = run_pipeline(
+            config, steps, classifiers, tfidf_configs, summarize=args.summarize
+        )
     sys.exit(0 if success else 1)
 
 

@@ -94,6 +94,12 @@ class ClassifierConfig:
     xgb_learning_rate: float = 0.3
     xgb_use_gpu: bool = False
     xgb_tree_method: str = "auto"  # auto, gpu_hist, hist, exact
+    xgb_objective: str = (
+        "multi:softprob"  # multi:softprob, reg:squarederror, reg:pseudohubererror, rank:pairwise
+    )
+
+    # Mord (ordinal regression) parameters
+    mord_alpha: float = 1.0  # Regularization strength
 
     random_state: int = 42
 
@@ -104,6 +110,7 @@ class ClassifierConfig:
             "randomforest",
             "svm",
             "xgboost",
+            "mord-lr",
         ]
         if self.classifier_type not in valid_classifiers:
             raise ValueError(

@@ -4,6 +4,39 @@ Centralized Configuration System for CEFR Classification Pipeline
 This module provides a comprehensive dataclass-based configuration system
 for the CEFR (Common European Framework of Reference for Languages)
 text classification pipeline.
+
+Configuration Classes
+---------------------
+- TfidfConfig: TF-IDF vectorizer settings (max_features, ngram_range, etc.)
+- ClassifierConfig: ML classifier settings (type, hyperparameters)
+- DataConfig: Data column mappings (text_column, label_column, cefr_column)
+- ExperimentConfig: Directory paths (experiment_dir, models_dir, features_dir, etc.)
+- OutputConfig: Output preferences (verbose, save_config, save_features)
+- GlobalConfig: Combines all configs + provides utility methods
+
+Usage
+-----
+# From command-line arguments
+config = GlobalConfig.from_cli_args(args)
+
+# From YAML file
+config = GlobalConfig.from_yaml_file("config.yaml")
+
+# From JSON file
+config = GlobalConfig.from_json_file("config.json")
+
+# Programmatic creation
+config = GlobalConfig(
+    experiment_config=ExperimentConfig(experiment_dir="experiments/my-exp"),
+    tfidf_config=TfidfConfig(max_features=10000),
+    classifier_config=ClassifierConfig(classifier_type="xgboost"),
+    data_config=DataConfig(cefr_column="cefr_level"),
+    output_config=OutputConfig(verbose=True)
+)
+
+# Get hashed directory names (for feature isolation)
+hash_code = config.tfidf_config.get_hash()  # e.g., "abc12345"
+tfidf_dir = config.experiment_config.get_tfidf_model_dir(config.tfidf_config)
 """
 
 import hashlib
@@ -95,11 +128,11 @@ class ClassifierConfig:
     xgb_use_gpu: bool = False
     xgb_tree_method: str = "auto"  # auto, gpu_hist, hist, exact
     xgb_objective: str = (
-        "multi:softprob"  # multi:softprob, reg:squarederror, reg:pseudohubererror, rank:pairwise
+        "multi:softprob"  # multi:softprob, multi:softmax, reg:squarederror, etc.
     )
 
     # Mord (ordinal regression) parameters
-    mord_alpha: float = 1.0  # Regularization strength
+    mord_alpha: float = 1.0
 
     random_state: int = 42
 
@@ -110,7 +143,6 @@ class ClassifierConfig:
             "randomforest",
             "svm",
             "xgboost",
-            "mord-lr",
         ]
         if self.classifier_type not in valid_classifiers:
             raise ValueError(

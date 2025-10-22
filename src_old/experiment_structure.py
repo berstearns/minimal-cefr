@@ -75,7 +75,9 @@ SCRIPT RESPONSIBILITIES:
 """
 
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
+import json
+
 
 # Canonical structure definition
 EXPERIMENT_STRUCTURE = {
@@ -83,19 +85,19 @@ EXPERIMENT_STRUCTURE = {
         "type": "directory",
         "required": True,
         "description": "Training data CSVs",
-        "expected_files": ["*.csv"],
+        "expected_files": ["*.csv"]
     },
     "ml-test-data": {
         "type": "directory",
         "required": True,
         "description": "Test data CSVs",
-        "expected_files": ["*.csv"],
+        "expected_files": ["*.csv"]
     },
     "features-training-data": {
         "type": "directory",
         "required": False,
         "description": "Training features for holdout validation",
-        "expected_files": ["*.csv"],
+        "expected_files": ["*.csv"]
     },
     "feature-models": {
         "type": "directory",
@@ -105,22 +107,18 @@ EXPERIMENT_STRUCTURE = {
             "{config_hash}_tfidf": {
                 "type": "directory",
                 "pattern": r"^[0-9a-f]{8}_tfidf(?:_grouped)?$",
-                "expected_files": ["config.json", "tfidf_model.pkl"],
+                "expected_files": ["config.json", "tfidf_model.pkl"]
             },
             "classifiers": {
                 "type": "directory",
                 "expected_subdirs": {
                     "{model_name}": {
                         "pattern": r"^.+_[0-9a-f]{8}_tfidf(?:_grouped)?$",
-                        "expected_files": [
-                            "classifier.pkl",
-                            "config.json",
-                            "label_encoder.pkl",
-                        ],
+                        "expected_files": ["classifier.pkl", "config.json", "label_encoder.pkl"]
                     }
-                },
-            },
-        },
+                }
+            }
+        }
     },
     "features": {
         "type": "directory",
@@ -132,15 +130,11 @@ EXPERIMENT_STRUCTURE = {
                 "pattern": r"^[0-9a-f]{8}_tfidf(?:_grouped)?$",
                 "expected_subdirs": {
                     "{dataset_name}": {
-                        "expected_files": [
-                            "config.json",
-                            "feature_names.csv",
-                            "features_dense.csv",
-                        ]
+                        "expected_files": ["config.json", "feature_names.csv", "features_dense.csv"]
                     }
-                },
+                }
             }
-        },
+        }
     },
     "results": {
         "type": "directory",
@@ -155,18 +149,20 @@ EXPERIMENT_STRUCTURE = {
                             "soft_predictions.json",
                             "argmax_predictions.json",
                             "rounded_avg_predictions.json",
-                            "evaluation_report.md",
+                            "evaluation_report.md"
                         ]
                     }
-                },
+                }
             }
-        },
-    },
+        }
+    }
 }
 
 
-def validate_experiment_structure(  # noqa: C901
-    experiment_dir: str, required_dirs: Optional[List[str]] = None, verbose: bool = True
+def validate_experiment_structure(
+    experiment_dir: str,
+    required_dirs: Optional[List[str]] = None,
+    verbose: bool = True
 ) -> Tuple[bool, List[str]]:
     """
     Validate that an experiment directory follows the canonical structure.
@@ -195,13 +191,9 @@ def validate_experiment_structure(  # noqa: C901
 
     # Determine which directories to check
     if required_dirs is None:
-        dirs_to_check = {
-            k: v for k, v in EXPERIMENT_STRUCTURE.items() if v.get("required", True)
-        }
+        dirs_to_check = {k: v for k, v in EXPERIMENT_STRUCTURE.items() if v.get("required", True)}
     else:
-        dirs_to_check = {
-            k: v for k, v in EXPERIMENT_STRUCTURE.items() if k in required_dirs
-        }
+        dirs_to_check = {k: v for k, v in EXPERIMENT_STRUCTURE.items() if k in required_dirs}
 
     # Check required directories
     for dir_name, dir_spec in dirs_to_check.items():
@@ -279,9 +271,7 @@ For detailed structure documentation, see: src/experiment_structure.py
 """
 
 
-def create_experiment_structure(
-    experiment_dir: str, create_subdirs: bool = False
-) -> None:
+def create_experiment_structure(experiment_dir: str, create_subdirs: bool = False) -> None:
     """
     Create the basic experiment directory structure.
 
@@ -302,7 +292,7 @@ def create_experiment_structure(
     # Create classifiers subdirectory
     classifiers_dir = exp_path / "feature-models" / "classifiers"
     classifiers_dir.mkdir(parents=True, exist_ok=True)
-    print("Created: feature-models/classifiers/")
+    print(f"Created: feature-models/classifiers/")
 
     print(f"\n✓ Experiment structure created at: {experiment_dir}")
 
@@ -312,9 +302,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         print("Usage:")
-        print(
-            "  Validate: python -m src.experiment_structure validate <experiment_dir>"
-        )
+        print("  Validate: python -m src.experiment_structure validate <experiment_dir>")
         print("  Create:   python -m src.experiment_structure create <experiment_dir>")
         print("  Show:     python -m src.experiment_structure show")
         sys.exit(1)

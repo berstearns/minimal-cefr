@@ -136,11 +136,10 @@ text,model,mean_perplexity,median_perplexity,std_perplexity,mean_entropy,total_t
 import argparse
 import json
 import pickle
-from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
-
+from typing import List, Dict, Any, Optional, Union, Tuple
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, asdict
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -148,21 +147,18 @@ from tqdm import tqdm
 try:
     import torch
     import torch.nn.functional as F
-
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
 
 try:
     from transformers import AutoModelForCausalLM, AutoTokenizer
-
     HF_AVAILABLE = True
 except ImportError:
     HF_AVAILABLE = False
 
 try:
     from datasets import load_dataset
-
     DATASETS_AVAILABLE = True
 except ImportError:
     DATASETS_AVAILABLE = False
@@ -171,7 +167,6 @@ except ImportError:
 @dataclass
 class TokenPerplexity:
     """Detailed per-token perplexity information."""
-
     token: str
     token_id: int
     position: int
@@ -192,7 +187,6 @@ class TokenPerplexity:
 @dataclass
 class TextPerplexityResult:
     """Complete perplexity analysis for a text."""
-
     text: str
     model: str
     tokens: List[TokenPerplexity]
@@ -201,10 +195,10 @@ class TextPerplexityResult:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
-            "text": self.text,
-            "model": self.model,
-            "tokens": [t.to_dict() for t in self.tokens],
-            "aggregate": self.aggregate,
+            'text': self.text,
+            'model': self.model,
+            'tokens': [t.to_dict() for t in self.tokens],
+            'aggregate': self.aggregate
         }
 
 
@@ -213,7 +207,10 @@ class LanguageModel(ABC):
 
     @abstractmethod
     def compute_token_perplexities(
-        self, text: str, top_k: int = 5, context_window: int = 3
+        self,
+        text: str,
+        top_k: int = 5,
+        context_window: int = 3
     ) -> TextPerplexityResult:
         """
         Compute per-token perplexity for input text.
@@ -243,7 +240,7 @@ class HuggingFaceLanguageModel(LanguageModel):
         device: str = "cpu",
         trust_remote_code: bool = False,
         max_tokens: Optional[int] = None,
-        padding_strategy: str = "sliding_window",
+        padding_strategy: str = "sliding_window"
     ):
         """
         Initialize HuggingFace model.
@@ -256,9 +253,7 @@ class HuggingFaceLanguageModel(LanguageModel):
             padding_strategy: How to handle long texts ('truncate', 'sliding_window')
         """
         if not HF_AVAILABLE:
-            raise ImportError(
-                "transformers not installed. Install with: pip install transformers"
-            )
+            raise ImportError("transformers not installed. Install with: pip install transformers")
         if not TORCH_AVAILABLE:
             raise ImportError("torch not installed. Install with: pip install torch")
 
@@ -268,10 +263,12 @@ class HuggingFaceLanguageModel(LanguageModel):
 
         print(f"Loading model: {model_name}...")
         self.tokenizer = AutoTokenizer.from_pretrained(
-            model_name, trust_remote_code=trust_remote_code
+            model_name,
+            trust_remote_code=trust_remote_code
         )
         self.model = AutoModelForCausalLM.from_pretrained(
-            model_name, trust_remote_code=trust_remote_code
+            model_name,
+            trust_remote_code=trust_remote_code
         ).to(device)
         self.model.eval()
 
@@ -282,16 +279,14 @@ class HuggingFaceLanguageModel(LanguageModel):
         # Determine max_tokens
         if max_tokens is None:
             # Use model's max position embeddings
-            if hasattr(self.model.config, "max_position_embeddings"):
+            if hasattr(self.model.config, 'max_position_embeddings'):
                 self.max_tokens = self.model.config.max_position_embeddings
-            elif hasattr(self.model.config, "n_positions"):
+            elif hasattr(self.model.config, 'n_positions'):
                 self.max_tokens = self.model.config.n_positions
             else:
                 # Fallback to 512
                 self.max_tokens = 512
-                print(
-                    f"⚠ Could not determine model max_length, using default: {self.max_tokens}"
-                )
+                print(f"⚠ Could not determine model max_length, using default: {self.max_tokens}")
         else:
             self.max_tokens = max_tokens
 
@@ -300,7 +295,11 @@ class HuggingFaceLanguageModel(LanguageModel):
         print(f"  Padding strategy: {padding_strategy}")
 
     def _compute_chunk_perplexities(
-        self, input_ids: torch.Tensor, start_idx: int, top_k: int, context_window: int
+        self,
+        input_ids: torch.Tensor,
+        start_idx: int,
+        top_k: int,
+        context_window: int
     ) -> List[TokenPerplexity]:
         """
         Compute perplexities for a chunk of tokens.
@@ -348,7 +347,7 @@ class HuggingFaceLanguageModel(LanguageModel):
                     {
                         "token": self.tokenizer.decode([idx.item()]),
                         "token_id": idx.item(),
-                        "prob": prob.item(),
+                        "prob": prob.item()
                     }
                     for prob, idx in zip(top_k_probs, top_k_indices)
                 ]
@@ -369,26 +368,27 @@ class HuggingFaceLanguageModel(LanguageModel):
                 # Decode token
                 token_str = self.tokenizer.decode([token_id])
 
-                token_perplexities.append(
-                    TokenPerplexity(
-                        token=token_str,
-                        token_id=token_id,
-                        position=start_idx + i,  # Global position
-                        logit=logit,
-                        prob=token_prob,
-                        perplexity=perplexity,
-                        entropy=entropy,
-                        rank=rank,
-                        top_k_tokens=top_k_tokens,
-                        context_before=context_before,
-                        context_after=context_after,
-                    )
-                )
+                token_perplexities.append(TokenPerplexity(
+                    token=token_str,
+                    token_id=token_id,
+                    position=start_idx + i,  # Global position
+                    logit=logit,
+                    prob=token_prob,
+                    perplexity=perplexity,
+                    entropy=entropy,
+                    rank=rank,
+                    top_k_tokens=top_k_tokens,
+                    context_before=context_before,
+                    context_after=context_after
+                ))
 
         return token_perplexities
 
     def compute_token_perplexities(
-        self, text: str, top_k: int = 5, context_window: int = 3
+        self,
+        text: str,
+        top_k: int = 5,
+        context_window: int = 3
     ) -> TextPerplexityResult:
         """Compute per-token perplexity using HuggingFace model."""
 
@@ -403,18 +403,18 @@ class HuggingFaceLanguageModel(LanguageModel):
                 input_ids=input_ids,
                 start_idx=0,
                 top_k=top_k,
-                context_window=context_window,
+                context_window=context_window
             )
         else:
             # Use sliding window strategy
             if self.padding_strategy == "truncate":
                 # Simple truncation
-                truncated_ids = input_ids[: self.max_tokens]
+                truncated_ids = input_ids[:self.max_tokens]
                 token_perplexities = self._compute_chunk_perplexities(
                     input_ids=truncated_ids,
                     start_idx=0,
                     top_k=top_k,
-                    context_window=context_window,
+                    context_window=context_window
                 )
 
             elif self.padding_strategy == "sliding_window":
@@ -434,7 +434,7 @@ class HuggingFaceLanguageModel(LanguageModel):
                         input_ids=chunk_ids,
                         start_idx=position,
                         top_k=top_k,
-                        context_window=context_window,
+                        context_window=context_window
                     )
 
                     token_perplexities.extend(chunk_perplexities)
@@ -458,7 +458,7 @@ class HuggingFaceLanguageModel(LanguageModel):
                 "max_perplexity": float(np.max(perplexities)),
                 "mean_entropy": float(np.mean(entropies)),
                 "std_entropy": float(np.std(entropies)),
-                "total_tokens": len(token_perplexities),
+                "total_tokens": len(token_perplexities)
             }
         else:
             aggregate = {
@@ -469,14 +469,14 @@ class HuggingFaceLanguageModel(LanguageModel):
                 "max_perplexity": 0.0,
                 "mean_entropy": 0.0,
                 "std_entropy": 0.0,
-                "total_tokens": 0,
+                "total_tokens": 0
             }
 
         return TextPerplexityResult(
             text=text,
             model=self.model_name,
             tokens=token_perplexities,
-            aggregate=aggregate,
+            aggregate=aggregate
         )
 
     def get_model_name(self) -> str:
@@ -493,7 +493,7 @@ class PyTorchLanguageModel(LanguageModel):
         tokenizer_path: str,
         device: str = "cpu",
         max_tokens: Optional[int] = None,
-        padding_strategy: str = "sliding_window",
+        padding_strategy: str = "sliding_window"
     ):
         """
         Initialize custom PyTorch model.
@@ -517,19 +517,18 @@ class PyTorchLanguageModel(LanguageModel):
         checkpoint = torch.load(model_path, map_location=device)
 
         # Try to reconstruct model from checkpoint
-        if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+        if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
             # Model saved as state dict - reconstruct
             from src.mock_pytorch_lm import SimpleCausalLM
-
             self.model = SimpleCausalLM(
-                vocab_size=checkpoint["vocab_size"],
-                embed_dim=checkpoint["embed_dim"],
-                hidden_dim=checkpoint["hidden_dim"],
-                max_length=checkpoint["max_length"],
+                vocab_size=checkpoint['vocab_size'],
+                embed_dim=checkpoint['embed_dim'],
+                hidden_dim=checkpoint['hidden_dim'],
+                max_length=checkpoint['max_length']
             )
-            self.model.load_state_dict(checkpoint["state_dict"])
+            self.model.load_state_dict(checkpoint['state_dict'])
             self.model = self.model.to(device)
-            model_max_length = checkpoint["max_length"]
+            model_max_length = checkpoint['max_length']
         else:
             # Model saved as full object (legacy)
             self.model = checkpoint
@@ -544,15 +543,14 @@ class PyTorchLanguageModel(LanguageModel):
             self.max_tokens = max_tokens
 
         print(f"Loading tokenizer from: {tokenizer_path}...")
-        if tokenizer_path.endswith(".pkl"):
-            with open(tokenizer_path, "rb") as f:
+        if tokenizer_path.endswith('.pkl'):
+            with open(tokenizer_path, 'rb') as f:
                 self.tokenizer = pickle.load(f)
-        elif tokenizer_path.endswith(".json"):
-            with open(tokenizer_path, "r") as f:
+        elif tokenizer_path.endswith('.json'):
+            with open(tokenizer_path, 'r') as f:
                 tokenizer_data = json.load(f)
                 # Reconstruct tokenizer from JSON
                 from src.mock_pytorch_lm import SimpleTokenizer
-
                 self.tokenizer = SimpleTokenizer.from_json(tokenizer_data)
         else:
             raise ValueError(f"Unsupported tokenizer format: {tokenizer_path}")
@@ -562,7 +560,11 @@ class PyTorchLanguageModel(LanguageModel):
         print(f"  Padding strategy: {padding_strategy}")
 
     def _compute_chunk_perplexities(
-        self, input_ids: torch.Tensor, start_idx: int, top_k: int, context_window: int
+        self,
+        input_ids: torch.Tensor,
+        start_idx: int,
+        top_k: int,
+        context_window: int
     ) -> List[TokenPerplexity]:
         """Compute perplexities for a chunk of tokens."""
         token_perplexities = []
@@ -599,7 +601,7 @@ class PyTorchLanguageModel(LanguageModel):
                     {
                         "token": self.tokenizer.decode([idx.item()]),
                         "token_id": idx.item(),
-                        "prob": prob.item(),
+                        "prob": prob.item()
                     }
                     for prob, idx in zip(top_k_probs, top_k_indices)
                 ]
@@ -620,26 +622,27 @@ class PyTorchLanguageModel(LanguageModel):
                 # Decode token
                 token_str = self.tokenizer.decode([token_id])
 
-                token_perplexities.append(
-                    TokenPerplexity(
-                        token=token_str,
-                        token_id=token_id,
-                        position=start_idx + i,  # Global position
-                        logit=logit,
-                        prob=token_prob,
-                        perplexity=perplexity,
-                        entropy=entropy,
-                        rank=rank,
-                        top_k_tokens=top_k_tokens,
-                        context_before=context_before,
-                        context_after=context_after,
-                    )
-                )
+                token_perplexities.append(TokenPerplexity(
+                    token=token_str,
+                    token_id=token_id,
+                    position=start_idx + i,  # Global position
+                    logit=logit,
+                    prob=token_prob,
+                    perplexity=perplexity,
+                    entropy=entropy,
+                    rank=rank,
+                    top_k_tokens=top_k_tokens,
+                    context_before=context_before,
+                    context_after=context_after
+                ))
 
         return token_perplexities
 
     def compute_token_perplexities(
-        self, text: str, top_k: int = 5, context_window: int = 3
+        self,
+        text: str,
+        top_k: int = 5,
+        context_window: int = 3
     ) -> TextPerplexityResult:
         """Compute per-token perplexity using custom PyTorch model."""
 
@@ -654,18 +657,18 @@ class PyTorchLanguageModel(LanguageModel):
                 input_ids=input_ids,
                 start_idx=0,
                 top_k=top_k,
-                context_window=context_window,
+                context_window=context_window
             )
         else:
             # Use sliding window strategy
             if self.padding_strategy == "truncate":
                 # Simple truncation
-                truncated_ids = input_ids[: self.max_tokens]
+                truncated_ids = input_ids[:self.max_tokens]
                 token_perplexities = self._compute_chunk_perplexities(
                     input_ids=truncated_ids,
                     start_idx=0,
                     top_k=top_k,
-                    context_window=context_window,
+                    context_window=context_window
                 )
 
             elif self.padding_strategy == "sliding_window":
@@ -684,7 +687,7 @@ class PyTorchLanguageModel(LanguageModel):
                         input_ids=chunk_ids,
                         start_idx=position,
                         top_k=top_k,
-                        context_window=context_window,
+                        context_window=context_window
                     )
 
                     token_perplexities.extend(chunk_perplexities)
@@ -708,7 +711,7 @@ class PyTorchLanguageModel(LanguageModel):
                 "max_perplexity": float(np.max(perplexities)),
                 "mean_entropy": float(np.mean(entropies)),
                 "std_entropy": float(np.std(entropies)),
-                "total_tokens": len(token_perplexities),
+                "total_tokens": len(token_perplexities)
             }
         else:
             aggregate = {
@@ -719,14 +722,14 @@ class PyTorchLanguageModel(LanguageModel):
                 "max_perplexity": 0.0,
                 "mean_entropy": 0.0,
                 "std_entropy": 0.0,
-                "total_tokens": 0,
+                "total_tokens": 0
             }
 
         return TextPerplexityResult(
             text=text,
             model=self.get_model_name(),
             tokens=token_perplexities,
-            aggregate=aggregate,
+            aggregate=aggregate
         )
 
     def get_model_name(self) -> str:
@@ -735,7 +738,10 @@ class PyTorchLanguageModel(LanguageModel):
 
 
 def load_model(
-    model_type: str, model_name_or_path: str, device: str = "cpu", **kwargs
+    model_type: str,
+    model_name_or_path: str,
+    device: str = "cpu",
+    **kwargs
 ) -> LanguageModel:
     """
     Load language model based on type.
@@ -753,24 +759,27 @@ def load_model(
         return HuggingFaceLanguageModel(
             model_name=model_name_or_path,
             device=device,
-            trust_remote_code=kwargs.get("trust_remote_code", False),
-            max_tokens=kwargs.get("max_tokens"),
-            padding_strategy=kwargs.get("padding_strategy", "sliding_window"),
+            trust_remote_code=kwargs.get('trust_remote_code', False),
+            max_tokens=kwargs.get('max_tokens'),
+            padding_strategy=kwargs.get('padding_strategy', 'sliding_window')
         )
     elif model_type == "pytorch":
         return PyTorchLanguageModel(
             model_path=model_name_or_path,
-            tokenizer_path=kwargs.get("tokenizer_path"),
+            tokenizer_path=kwargs.get('tokenizer_path'),
             device=device,
-            max_tokens=kwargs.get("max_tokens"),
-            padding_strategy=kwargs.get("padding_strategy", "sliding_window"),
+            max_tokens=kwargs.get('max_tokens'),
+            padding_strategy=kwargs.get('padding_strategy', 'sliding_window')
         )
     else:
         raise ValueError(f"Unknown model type: {model_type}")
 
 
 def process_single_text(
-    text: str, model: LanguageModel, top_k: int = 5, context_window: int = 3
+    text: str,
+    model: LanguageModel,
+    top_k: int = 5,
+    context_window: int = 3
 ) -> TextPerplexityResult:
     """Process a single text."""
     return model.compute_token_perplexities(text, top_k, context_window)
@@ -783,7 +792,7 @@ def process_csv_file(
     top_k: int = 5,
     context_window: int = 3,
     limit: Optional[int] = None,
-    verbose: bool = True,
+    verbose: bool = True
 ) -> List[TextPerplexityResult]:
     """Process CSV file with text column."""
     df = pd.read_csv(csv_path)
@@ -791,7 +800,7 @@ def process_csv_file(
     if text_column not in df.columns:
         raise ValueError(f"Column '{text_column}' not found in {csv_path}")
 
-    texts = df[text_column].fillna("").astype(str).tolist()
+    texts = df[text_column].fillna('').astype(str).tolist()
 
     if limit:
         texts = texts[:limit]
@@ -808,10 +817,13 @@ def process_csv_file(
 
 
 def process_text_file(
-    txt_path: str, model: LanguageModel, top_k: int = 5, context_window: int = 3
+    txt_path: str,
+    model: LanguageModel,
+    top_k: int = 5,
+    context_window: int = 3
 ) -> TextPerplexityResult:
     """Process plain text file."""
-    with open(txt_path, "r", encoding="utf-8") as f:
+    with open(txt_path, 'r', encoding='utf-8') as f:
         text = f.read()
 
     return model.compute_token_perplexities(text, top_k, context_window)
@@ -825,7 +837,7 @@ def process_hf_dataset(
     top_k: int = 5,
     context_window: int = 3,
     limit: Optional[int] = None,
-    verbose: bool = True,
+    verbose: bool = True
 ) -> List[TextPerplexityResult]:
     """Process HuggingFace dataset."""
     if not DATASETS_AVAILABLE:
@@ -857,7 +869,7 @@ def save_results(
     results: Union[TextPerplexityResult, List[TextPerplexityResult]],
     output_path: str,
     save_format: str = "json",
-    aggregate_only: bool = False,
+    aggregate_only: bool = False
 ):
     """
     Save perplexity results to file.
@@ -877,24 +889,31 @@ def save_results(
     if save_format == "json":
         # Save as single JSON file
         if aggregate_only:
-            data = [{"text": r.text, "model": r.model, **r.aggregate} for r in results]
+            data = [
+                {
+                    'text': r.text,
+                    'model': r.model,
+                    **r.aggregate
+                }
+                for r in results
+            ]
         else:
             data = [r.to_dict() for r in results]
 
-        with open(output_path, "w", encoding="utf-8") as f:
+        with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
         print(f"✓ Saved to: {output_path}")
 
     elif save_format == "jsonl":
         # Save as JSON lines
-        with open(output_path, "w", encoding="utf-8") as f:
+        with open(output_path, 'w', encoding='utf-8') as f:
             for r in results:
                 if aggregate_only:
-                    data = {"text": r.text, "model": r.model, **r.aggregate}
+                    data = {'text': r.text, 'model': r.model, **r.aggregate}
                 else:
                     data = r.to_dict()
-                f.write(json.dumps(data, ensure_ascii=False) + "\n")
+                f.write(json.dumps(data, ensure_ascii=False) + '\n')
 
         print(f"✓ Saved to: {output_path}")
 
@@ -902,7 +921,11 @@ def save_results(
         # Save aggregates as CSV
         data = []
         for r in results:
-            row = {"text": r.text, "model": r.model, **r.aggregate}
+            row = {
+                'text': r.text,
+                'model': r.model,
+                **r.aggregate
+            }
             data.append(row)
 
         df = pd.DataFrame(data)
@@ -914,125 +937,143 @@ def save_results(
         raise ValueError(f"Unknown save format: {save_format}")
 
 
-def main():  # noqa: C901
+def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
         description="Extract per-token perplexity features from language models",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     # Input configuration
     input_group = parser.add_mutually_exclusive_group(required=True)
-    input_group.add_argument("--text", type=str, help="Single text string to process")
-    input_group.add_argument("-i", "--input", type=str, help="Input file (CSV or TXT)")
-    input_group.add_argument("--dataset", type=str, help="HuggingFace dataset name")
+    input_group.add_argument(
+        '--text',
+        type=str,
+        help='Single text string to process'
+    )
+    input_group.add_argument(
+        '-i', '--input',
+        type=str,
+        help='Input file (CSV or TXT)'
+    )
+    input_group.add_argument(
+        '--dataset',
+        type=str,
+        help='HuggingFace dataset name'
+    )
 
     # CSV/Dataset configuration
     parser.add_argument(
-        "--text-column",
+        '--text-column',
         type=str,
-        default="text",
-        help="Column name containing text (default: text)",
+        default='text',
+        help='Column name containing text (default: text)'
     )
     parser.add_argument(
-        "--dataset-split",
+        '--dataset-split',
         type=str,
-        default="test",
-        help="Dataset split to use (default: test)",
+        default='test',
+        help='Dataset split to use (default: test)'
     )
-    parser.add_argument("--limit", type=int, help="Limit number of texts to process")
+    parser.add_argument(
+        '--limit',
+        type=int,
+        help='Limit number of texts to process'
+    )
 
     # Model configuration
     parser.add_argument(
-        "--model-type",
+        '--model-type',
         type=str,
-        choices=["huggingface", "pytorch"],
-        default="huggingface",
-        help="Model type (default: huggingface)",
+        choices=['huggingface', 'pytorch'],
+        default='huggingface',
+        help='Model type (default: huggingface)'
     )
     parser.add_argument(
-        "-m", "--model", type=str, help="Model name (HuggingFace) or path (PyTorch)"
-    )
-    parser.add_argument(
-        "-t",
-        "--tokenizer-path",
+        '-m', '--model',
         type=str,
-        help="Path to tokenizer (for PyTorch models)",
+        help='Model name (HuggingFace) or path (PyTorch)'
     )
     parser.add_argument(
-        "-d",
-        "--device",
+        '-t', '--tokenizer-path',
         type=str,
-        default="cpu",
-        choices=["cpu", "cuda", "mps"],
-        help="Device to use (default: cpu)",
+        help='Path to tokenizer (for PyTorch models)'
     )
     parser.add_argument(
-        "--trust-remote-code",
-        action="store_true",
-        help="Trust remote code for custom HuggingFace models",
+        '-d', '--device',
+        type=str,
+        default='cpu',
+        choices=['cpu', 'cuda', 'mps'],
+        help='Device to use (default: cpu)'
+    )
+    parser.add_argument(
+        '--trust-remote-code',
+        action='store_true',
+        help='Trust remote code for custom HuggingFace models'
     )
 
     # Feature configuration
     parser.add_argument(
-        "--top-k",
+        '--top-k',
         type=int,
         default=5,
-        help="Number of top alternative tokens to save (default: 5)",
+        help='Number of top alternative tokens to save (default: 5)'
     )
     parser.add_argument(
-        "--context-window",
+        '--context-window',
         type=int,
         default=3,
-        help="Number of context tokens before/after (default: 3)",
+        help='Number of context tokens before/after (default: 3)'
     )
 
     # Padding/windowing configuration
     parser.add_argument(
-        "--max-tokens",
+        '--max-tokens',
         type=int,
-        help="Maximum tokens per forward pass (default: model max_position_embeddings)",
+        help='Maximum tokens per forward pass (default: model max_position_embeddings)'
     )
     parser.add_argument(
-        "--padding-strategy",
+        '--padding-strategy',
         type=str,
-        choices=["truncate", "sliding_window"],
-        default="sliding_window",
-        help="Strategy for handling long texts (default: sliding_window)",
+        choices=['truncate', 'sliding_window'],
+        default='sliding_window',
+        help='Strategy for handling long texts (default: sliding_window)'
     )
 
     # Output configuration
     parser.add_argument(
-        "-o", "--output", type=str, required=True, help="Output file path"
-    )
-    parser.add_argument(
-        "-f",
-        "--save-format",
+        '-o', '--output',
         type=str,
-        choices=["json", "jsonl", "csv"],
-        default="json",
-        help="Output format (default: json)",
+        required=True,
+        help='Output file path'
     )
     parser.add_argument(
-        "--aggregate-only",
-        action="store_true",
-        help="Save only aggregate statistics, not per-token details",
+        '-f', '--save-format',
+        type=str,
+        choices=['json', 'jsonl', 'csv'],
+        default='json',
+        help='Output format (default: json)'
+    )
+    parser.add_argument(
+        '--aggregate-only',
+        action='store_true',
+        help='Save only aggregate statistics, not per-token details'
     )
 
     # Other options
     parser.add_argument(
-        "-q", "--quiet", action="store_true", help="Suppress verbose output"
+        '-q', '--quiet',
+        action='store_true',
+        help='Suppress verbose output'
     )
 
     args = parser.parse_args()
 
     # Check dependencies
-    if args.model_type == "huggingface" and not HF_AVAILABLE:
-        parser.error(
-            "transformers not installed. Install with: pip install transformers"
-        )
+    if args.model_type == 'huggingface' and not HF_AVAILABLE:
+        parser.error("transformers not installed. Install with: pip install transformers")
 
-    if args.model_type == "pytorch" and not args.tokenizer_path:
+    if args.model_type == 'pytorch' and not args.tokenizer_path:
         parser.error("--tokenizer-path required for PyTorch models")
 
     if not TORCH_AVAILABLE:
@@ -1050,7 +1091,7 @@ def main():  # noqa: C901
             tokenizer_path=args.tokenizer_path,
             trust_remote_code=args.trust_remote_code,
             max_tokens=args.max_tokens,
-            padding_strategy=args.padding_strategy,
+            padding_strategy=args.padding_strategy
         )
     except Exception as e:
         parser.error(f"Failed to load model: {e}")
@@ -1063,14 +1104,14 @@ def main():  # noqa: C901
                 text=args.text,
                 model=model,
                 top_k=args.top_k,
-                context_window=args.context_window,
+                context_window=args.context_window
             )
             results = [result]
 
         elif args.input:
             # File input
             input_path = Path(args.input)
-            if input_path.suffix == ".csv":
+            if input_path.suffix == '.csv':
                 results = process_csv_file(
                     csv_path=str(input_path),
                     text_column=args.text_column,
@@ -1078,14 +1119,14 @@ def main():  # noqa: C901
                     top_k=args.top_k,
                     context_window=args.context_window,
                     limit=args.limit,
-                    verbose=not args.quiet,
+                    verbose=not args.quiet
                 )
-            elif input_path.suffix == ".txt":
+            elif input_path.suffix == '.txt':
                 result = process_text_file(
                     txt_path=str(input_path),
                     model=model,
                     top_k=args.top_k,
-                    context_window=args.context_window,
+                    context_window=args.context_window
                 )
                 results = [result]
             else:
@@ -1101,7 +1142,7 @@ def main():  # noqa: C901
                 top_k=args.top_k,
                 context_window=args.context_window,
                 limit=args.limit,
-                verbose=not args.quiet,
+                verbose=not args.quiet
             )
 
         else:
@@ -1112,7 +1153,7 @@ def main():  # noqa: C901
             results=results,
             output_path=args.output,
             save_format=args.save_format,
-            aggregate_only=args.aggregate_only,
+            aggregate_only=args.aggregate_only
         )
 
     except Exception as e:
@@ -1120,5 +1161,5 @@ def main():  # noqa: C901
         raise
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

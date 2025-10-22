@@ -318,18 +318,19 @@ import argparse
 import json
 import pickle
 from pathlib import Path
-from typing import List
-
+from typing import List, Optional
 import pandas as pd
+import numpy as np
 
-from src.config import DataConfig, ExperimentConfig, GlobalConfig, OutputConfig
-
+from src.config import GlobalConfig, ExperimentConfig, DataConfig, OutputConfig
 # Import GroupedTfidfVectorizer so pickle can load it
-from src.train_tfidf_groupby import GroupedTfidfVectorizer  # noqa: F401
+from src.train_tfidf_groupby import GroupedTfidfVectorizer
 
 
-def extract_features_for_file(  # noqa: C901
-    config: GlobalConfig, file_name: str, data_source: str = "test"
+def extract_features_for_file(
+    config: GlobalConfig,
+    file_name: str,
+    data_source: str = "test"
 ) -> Path:
     """
     Extract TF-IDF features for a specific data file.
@@ -365,7 +366,7 @@ def extract_features_for_file(  # noqa: C901
     config_hash = tfidf_config.get_hash()  # Default
 
     if config_path.exists():
-        with open(config_path, "r") as f:
+        with open(config_path, 'r') as f:
             model_config = json.load(f)
             # Get feature_type, with backward compatibility
             feature_type = model_config.get("feature_type")
@@ -377,15 +378,13 @@ def extract_features_for_file(  # noqa: C901
                     feature_type = "tfidf"
 
             # Get config_hash (old configs use "tfidf_hash")
-            config_hash = model_config.get("config_hash") or model_config.get(
-                "tfidf_hash", config_hash
-            )
+            config_hash = model_config.get("config_hash") or model_config.get("tfidf_hash", config_hash)
 
     if verbose:
         print(f"Loading TF-IDF model: {tfidf_model_path}")
         print(f"Feature type: {feature_type}")
 
-    with open(tfidf_model_path, "rb") as f:
+    with open(tfidf_model_path, 'rb') as f:
         tfidf = pickle.load(f)
 
     # Load data from appropriate source
@@ -394,9 +393,7 @@ def extract_features_for_file(  # noqa: C901
     elif data_source == "training":
         data_dir = exp_config.ml_training_dir
     else:
-        raise ValueError(
-            f"Invalid data_source: {data_source}. Must be 'test' or 'training'"
-        )
+        raise ValueError(f"Invalid data_source: {data_source}. Must be 'test' or 'training'")
 
     data_file_path = Path(data_dir) / file_name
     if not data_file_path.exists():
@@ -408,11 +405,9 @@ def extract_features_for_file(  # noqa: C901
     df_data = pd.read_csv(data_file_path)
 
     if data_config.text_column not in df_data.columns:
-        raise ValueError(
-            f"'{data_config.text_column}' column required in {data_file_path}"
-        )
+        raise ValueError(f"'{data_config.text_column}' column required in {data_file_path}")
 
-    X_data = df_data[data_config.text_column].fillna("").astype(str)
+    X_data = df_data[data_config.text_column].fillna('').astype(str)
 
     if verbose:
         print(f"Samples: {len(X_data)}")
@@ -424,7 +419,7 @@ def extract_features_for_file(  # noqa: C901
     X_data_tfidf = tfidf.transform(X_data)
 
     # Handle both sparse matrices (standard TF-IDF) and dense arrays (grouped TF-IDF)
-    if hasattr(X_data_tfidf, "toarray"):
+    if hasattr(X_data_tfidf, 'toarray'):
         X_data_dense = X_data_tfidf.toarray()
     else:
         X_data_dense = X_data_tfidf
@@ -443,9 +438,7 @@ def extract_features_for_file(  # noqa: C901
         # Save feature_names.csv
         feature_names = tfidf.get_feature_names_out()
         feature_names_path = features_dir / "feature_names.csv"
-        pd.DataFrame({"feature_name": feature_names}).to_csv(
-            feature_names_path, index=False
-        )
+        pd.DataFrame({'feature_name': feature_names}).to_csv(feature_names_path, index=False)
 
         if verbose:
             print(f"\n✓ Features saved to: {features_dir}")
@@ -461,22 +454,23 @@ def extract_features_for_file(  # noqa: C901
             "config_hash": config_hash,
             "n_samples": int(len(X_data)),
             "n_features": int(X_data_dense.shape[1]),
-            "model_path": str(tfidf_model_path.relative_to(exp_config.experiment_dir)),
+            "model_path": str(tfidf_model_path.relative_to(exp_config.experiment_dir))
         }
 
         if config.output_config.save_json:
             config_path = features_dir / "config.json"
-            with open(config_path, "w") as f:
+            with open(config_path, 'w') as f:
                 json.dump(feature_config, f, indent=2)
 
             if verbose:
-                print("  - config.json")
+                print(f"  - config.json")
 
     return features_dir
 
 
-def extract_all_from_source(  # noqa: C901
-    config: GlobalConfig, data_source: str = "test"
+def extract_all_from_source(
+    config: GlobalConfig,
+    data_source: str = "test"
 ) -> List[Path]:
     """
     Extract features for all files in specified data source.
@@ -559,50 +553,47 @@ def create_parser() -> argparse.ArgumentParser:
     """Create argument parser for extract_features."""
     parser = argparse.ArgumentParser(
         description="Extract TF-IDF features for CEFR test sets",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     # Config loading
     config_group = parser.add_argument_group("Configuration Loading")
     config_method = config_group.add_mutually_exclusive_group()
     config_method.add_argument(
-        "-c", "--config-file", help="Path to JSON or YAML config file"
+        "-c", "--config-file",
+        help="Path to JSON or YAML config file"
     )
     config_method.add_argument(
-        "--config-json", help="JSON string containing full configuration"
+        "--config-json",
+        help="JSON string containing full configuration"
     )
 
     # Experiment configuration
     exp_group = parser.add_argument_group("Experiment Configuration")
     exp_group.add_argument(
-        "-e",
-        "--experiment-dir",
-        help="Path to experiment directory (e.g., data/experiments/zero-shot)",
+        "-e", "--experiment-dir",
+        help="Path to experiment directory (e.g., data/experiments/zero-shot)"
     )
     exp_group.add_argument(
-        "-o",
-        "--output-dir",
-        help="Custom output directory for models (default: <experiment-dir>/feature-models)",
+        "-o", "--output-dir",
+        help="Custom output directory for models (default: <experiment-dir>/feature-models)"
     )
     exp_group.add_argument(
-        "-p",
-        "--pretrained-dir",
-        help="Directory containing pre-trained TF-IDF model (default: <output-dir>/tfidf)",
+        "-p", "--pretrained-dir",
+        help="Directory containing pre-trained TF-IDF model (default: <output-dir>/tfidf)"
     )
 
     # Data file selection
     data_group = parser.add_argument_group("Data File Selection")
     data_group.add_argument(
-        "-t",
-        "--test-file",
-        help="Specific file name to process (e.g., norm-celva-sp.csv). If not provided, processes all files from data source.",
+        "-t", "--test-file",
+        help="Specific file name to process (e.g., norm-celva-sp.csv). If not provided, processes all files from data source."
     )
     data_group.add_argument(
-        "-s",
-        "--data-source",
+        "-s", "--data-source",
         choices=["test", "training", "both"],
         default="test",
-        help="Data source to process: 'test' (ml-test-data), 'training' (ml-training-data), or 'both' (default: test)",
+        help="Data source to process: 'test' (ml-test-data), 'training' (ml-training-data), or 'both' (default: test)"
     )
 
     # Data configuration
@@ -610,34 +601,38 @@ def create_parser() -> argparse.ArgumentParser:
     data_group.add_argument(
         "--text-column",
         default="text",
-        help="Column name containing text (default: text)",
+        help="Column name containing text (default: text)"
     )
 
     # Output configuration
     output_group = parser.add_argument_group("Output Configuration")
     output_group.add_argument(
-        "--no-save-config", action="store_true", help="Skip saving configuration files"
+        "--no-save-config",
+        action="store_true",
+        help="Skip saving configuration files"
     )
     output_group.add_argument(
         "--no-save-features",
         action="store_true",
-        help="Skip saving feature files (for testing)",
+        help="Skip saving feature files (for testing)"
     )
     output_group.add_argument(
-        "-q", "--quiet", action="store_true", help="Suppress verbose output"
+        "-q", "--quiet",
+        action="store_true",
+        help="Suppress verbose output"
     )
 
     return parser
 
 
-def args_to_config(args: argparse.Namespace) -> GlobalConfig:  # noqa: C901
+def args_to_config(args: argparse.Namespace) -> GlobalConfig:
     """Convert argparse namespace to GlobalConfig."""
     # Check if config file or json string provided
     if args.config_file:
         config_path = Path(args.config_file)
-        if config_path.suffix in [".yaml", ".yml"]:
+        if config_path.suffix in ['.yaml', '.yml']:
             config = GlobalConfig.from_yaml_file(str(config_path))
-        elif config_path.suffix == ".json":
+        elif config_path.suffix == '.json':
             config = GlobalConfig.from_json_file(str(config_path))
         else:
             raise ValueError(f"Unsupported config file format: {config_path.suffix}")
@@ -647,9 +642,7 @@ def args_to_config(args: argparse.Namespace) -> GlobalConfig:  # noqa: C901
             config.experiment_config = ExperimentConfig(
                 experiment_dir=args.experiment_dir,
                 models_dir=args.output_dir if args.output_dir else None,
-                pretrained_tfidf_dir=(
-                    args.pretrained_dir if args.pretrained_dir else None
-                ),
+                pretrained_tfidf_dir=args.pretrained_dir if args.pretrained_dir else None
             )
         elif args.output_dir or args.pretrained_dir:
             if args.output_dir:
@@ -683,23 +676,27 @@ def args_to_config(args: argparse.Namespace) -> GlobalConfig:  # noqa: C901
         experiment_config = ExperimentConfig(
             experiment_dir=args.experiment_dir or "data/experiments/zero-shot",
             models_dir=args.output_dir if args.output_dir else None,
-            pretrained_tfidf_dir=args.pretrained_dir if args.pretrained_dir else None,
+            pretrained_tfidf_dir=args.pretrained_dir if args.pretrained_dir else None
         )
 
-        data_config = DataConfig(text_column=args.text_column)
+        data_config = DataConfig(
+            text_column=args.text_column
+        )
 
         output_config = OutputConfig(
             save_config=not args.no_save_config,
             save_features=not args.no_save_features,
-            verbose=not args.quiet,
+            verbose=not args.quiet
         )
 
         return GlobalConfig(
-            experiment_config, data_config=data_config, output_config=output_config
+            experiment_config,
+            data_config=data_config,
+            output_config=output_config
         )
 
 
-def main():  # noqa: C901
+def main():
     """Main entry point for feature extraction."""
     parser = create_parser()
     args = parser.parse_args()
@@ -718,9 +715,7 @@ def main():  # noqa: C901
         if config.experiment_config.pretrained_tfidf_dir:
             tfidf_dir = Path(config.experiment_config.pretrained_tfidf_dir)
         else:
-            tfidf_dir = Path(
-                config.experiment_config.get_tfidf_model_dir(config.tfidf_config)
-            )
+            tfidf_dir = Path(config.experiment_config.get_tfidf_model_dir(config.tfidf_config))
 
         # Load model config to get feature_type
         model_config_path = tfidf_dir / "config.json"
@@ -728,7 +723,7 @@ def main():  # noqa: C901
         config_hash = config.tfidf_config.get_hash()  # Default
 
         if model_config_path.exists():
-            with open(model_config_path, "r") as f:
+            with open(model_config_path, 'r') as f:
                 model_cfg = json.load(f)
                 # Get feature_type, with backward compatibility
                 feature_type = model_cfg.get("feature_type")
@@ -740,15 +735,11 @@ def main():  # noqa: C901
                         feature_type = "tfidf"
 
                 # Get config_hash (old configs use "tfidf_hash")
-                config_hash = model_cfg.get("config_hash") or model_cfg.get(
-                    "tfidf_hash", config_hash
-                )
+                config_hash = model_cfg.get("config_hash") or model_cfg.get("tfidf_hash", config_hash)
 
         print(f"\nTF-IDF model directory: {tfidf_dir}")
         print(f"Config hash: {config_hash}")
-        print(
-            f"Features output directory: {config.experiment_config.get_features_dir(config_hash, feature_type)}"
-        )
+        print(f"Features output directory: {config.experiment_config.get_features_dir(config_hash, feature_type)}")
         print()
 
     # Extract features

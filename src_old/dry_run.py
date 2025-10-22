@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import List, Optional
 
-from src.config import GlobalConfig, TfidfConfig
+from src.config import GlobalConfig, ExperimentConfig, TfidfConfig
 
 
 def create_dummy_file(file_path: Path, description: str = "", verbose: bool = True):
@@ -30,7 +30,7 @@ def create_dummy_file(file_path: Path, description: str = "", verbose: bool = Tr
         dummy_content = {
             "_dry_run": True,
             "_description": description or f"Dummy file for {file_path.name}",
-            "_note": "This is a dry run dummy file. Run the actual pipeline to generate real data.",
+            "_note": "This is a dry run dummy file. Run the actual pipeline to generate real data."
         }
         with open(file_path, "w") as f:
             json.dump(dummy_content, f, indent=2)
@@ -53,7 +53,7 @@ def create_dummy_file(file_path: Path, description: str = "", verbose: bool = Tr
 def dry_run_step1_tfidf(
     config: GlobalConfig,
     tfidf_configs: Optional[List[dict]] = None,
-    verbose: bool = True,
+    verbose: bool = True
 ) -> List[Path]:
     """
     Dry run for Step 1: Train TF-IDF Vectorizer(s).
@@ -79,17 +79,11 @@ def dry_run_step1_tfidf(
     for i, tfidf_conf_dict in enumerate(tfidf_configs, 1):
         # Create TF-IDF config
         tfidf_config = TfidfConfig(
-            max_features=tfidf_conf_dict.get(
-                "max_features", config.tfidf_config.max_features
-            ),
-            ngram_range=tfidf_conf_dict.get(
-                "ngram_range", config.tfidf_config.ngram_range
-            ),
+            max_features=tfidf_conf_dict.get("max_features", config.tfidf_config.max_features),
+            ngram_range=tfidf_conf_dict.get("ngram_range", config.tfidf_config.ngram_range),
             min_df=tfidf_conf_dict.get("min_df", config.tfidf_config.min_df),
             max_df=tfidf_conf_dict.get("max_df", config.tfidf_config.max_df),
-            sublinear_tf=tfidf_conf_dict.get(
-                "sublinear_tf", config.tfidf_config.sublinear_tf
-            ),
+            sublinear_tf=tfidf_conf_dict.get("sublinear_tf", config.tfidf_config.sublinear_tf),
         )
 
         # Get output directory
@@ -105,12 +99,12 @@ def dry_run_step1_tfidf(
         create_dummy_file(
             output_dir / "tfidf_model.pkl",
             f"TF-IDF model with {tfidf_config.max_features} features",
-            verbose,
+            verbose
         )
         create_dummy_file(
             output_dir / "config.json",
             f"TF-IDF configuration (hash: {tfidf_config.get_hash()})",
-            verbose,
+            verbose
         )
 
         created_dirs.append(output_dir)
@@ -122,7 +116,7 @@ def dry_run_step2_features(
     config: GlobalConfig,
     tfidf_configs: Optional[List[dict]] = None,
     data_source: str = "both",
-    verbose: bool = True,
+    verbose: bool = True
 ) -> List[Path]:
     """
     Dry run for Step 2: Extract Features.
@@ -156,17 +150,11 @@ def dry_run_step2_features(
     for i, tfidf_conf_dict in enumerate(tfidf_configs, 1):
         # Create TF-IDF config
         tfidf_config = TfidfConfig(
-            max_features=tfidf_conf_dict.get(
-                "max_features", config.tfidf_config.max_features
-            ),
-            ngram_range=tfidf_conf_dict.get(
-                "ngram_range", config.tfidf_config.ngram_range
-            ),
+            max_features=tfidf_conf_dict.get("max_features", config.tfidf_config.max_features),
+            ngram_range=tfidf_conf_dict.get("ngram_range", config.tfidf_config.ngram_range),
             min_df=tfidf_conf_dict.get("min_df", config.tfidf_config.min_df),
             max_df=tfidf_conf_dict.get("max_df", config.tfidf_config.max_df),
-            sublinear_tf=tfidf_conf_dict.get(
-                "sublinear_tf", config.tfidf_config.sublinear_tf
-            ),
+            sublinear_tf=tfidf_conf_dict.get("sublinear_tf", config.tfidf_config.sublinear_tf),
         )
 
         config_hash = tfidf_config.get_hash()
@@ -199,9 +187,7 @@ def dry_run_step2_features(
 
             for data_file in data_files:
                 dataset_name = data_file.stem
-                features_base_dir = Path(
-                    config.experiment_config.get_features_dir(config_hash, feature_type)
-                )
+                features_base_dir = Path(config.experiment_config.get_features_dir(config_hash, feature_type))
                 features_dir = features_base_dir / dataset_name
 
                 if verbose:
@@ -212,17 +198,17 @@ def dry_run_step2_features(
                 create_dummy_file(
                     features_dir / "features_dense.csv",
                     f"Dense feature matrix for {dataset_name}",
-                    verbose,
+                    verbose
                 )
                 create_dummy_file(
                     features_dir / "feature_names.csv",
                     f"Feature names for {dataset_name}",
-                    verbose,
+                    verbose
                 )
                 create_dummy_file(
                     features_dir / "config.json",
                     f"Feature extraction config for {dataset_name}",
-                    verbose,
+                    verbose
                 )
 
                 created_dirs.append(features_dir)
@@ -234,7 +220,7 @@ def dry_run_step3_classifiers(
     config: GlobalConfig,
     tfidf_configs: Optional[List[dict]] = None,
     classifiers: Optional[List[str]] = None,
-    verbose: bool = True,
+    verbose: bool = True
 ) -> List[Path]:
     """
     Dry run for Step 3: Train Classifiers.
@@ -277,17 +263,11 @@ def dry_run_step3_classifiers(
     for tfidf_idx, tfidf_conf_dict in enumerate(tfidf_configs, 1):
         # Create TF-IDF config
         tfidf_config = TfidfConfig(
-            max_features=tfidf_conf_dict.get(
-                "max_features", config.tfidf_config.max_features
-            ),
-            ngram_range=tfidf_conf_dict.get(
-                "ngram_range", config.tfidf_config.ngram_range
-            ),
+            max_features=tfidf_conf_dict.get("max_features", config.tfidf_config.max_features),
+            ngram_range=tfidf_conf_dict.get("ngram_range", config.tfidf_config.ngram_range),
             min_df=tfidf_conf_dict.get("min_df", config.tfidf_config.min_df),
             max_df=tfidf_conf_dict.get("max_df", config.tfidf_config.max_df),
-            sublinear_tf=tfidf_conf_dict.get(
-                "sublinear_tf", config.tfidf_config.sublinear_tf
-            ),
+            sublinear_tf=tfidf_conf_dict.get("sublinear_tf", config.tfidf_config.sublinear_tf),
         )
 
         config_hash = tfidf_config.get_hash()
@@ -295,9 +275,7 @@ def dry_run_step3_classifiers(
 
         for clf_idx, classifier_type in enumerate(classifiers, 1):
             if verbose:
-                print(
-                    f"\nTF-IDF {tfidf_idx}/{len(tfidf_configs)}, Classifier {clf_idx}/{len(classifiers)}:"
-                )
+                print(f"\nTF-IDF {tfidf_idx}/{len(tfidf_configs)}, Classifier {clf_idx}/{len(classifiers)}:")
                 print(f"  Config hash: {config_hash}")
                 print(f"  Classifier: {classifier_type}")
 
@@ -305,14 +283,8 @@ def dry_run_step3_classifiers(
                 dataset_name = training_file.stem
 
                 # Build model name
-                model_name = (
-                    f"{dataset_name}_{classifier_type}_{config_hash}_{feature_type}"
-                )
-                model_dir = (
-                    Path(config.experiment_config.models_dir)
-                    / "classifiers"
-                    / model_name
-                )
+                model_name = f"{dataset_name}_{classifier_type}_{config_hash}_{feature_type}"
+                model_dir = Path(config.experiment_config.models_dir) / "classifiers" / model_name
 
                 if verbose:
                     print(f"\n    Model: {model_name}")
@@ -322,17 +294,17 @@ def dry_run_step3_classifiers(
                 create_dummy_file(
                     model_dir / "classifier.pkl",
                     f"Classifier model: {classifier_type} for {dataset_name}",
-                    verbose,
+                    verbose
                 )
                 create_dummy_file(
                     model_dir / "label_encoder.pkl",
                     f"Label encoder for {dataset_name}",
-                    verbose,
+                    verbose
                 )
                 create_dummy_file(
                     model_dir / "config.json",
                     f"Classifier config: {classifier_type}",
-                    verbose,
+                    verbose
                 )
 
                 created_dirs.append(model_dir)
@@ -344,7 +316,7 @@ def dry_run_step4_predictions(
     config: GlobalConfig,
     tfidf_configs: Optional[List[dict]] = None,
     classifiers: Optional[List[str]] = None,
-    verbose: bool = True,
+    verbose: bool = True
 ) -> List[Path]:
     """
     Dry run for Step 4: Make Predictions.
@@ -375,30 +347,22 @@ def dry_run_step4_predictions(
     ml_training_dir = Path(config.experiment_config.ml_training_dir)
     ml_test_dir = Path(config.experiment_config.ml_test_dir)
 
-    training_files = (
-        sorted(ml_training_dir.glob("*.csv")) if ml_training_dir.exists() else []
-    )
+    training_files = sorted(ml_training_dir.glob("*.csv")) if ml_training_dir.exists() else []
     test_files = sorted(ml_test_dir.glob("*.csv")) if ml_test_dir.exists() else []
 
     if not training_files:
         if verbose:
-            print("  ⚠ No training CSV files found")
+            print(f"  ⚠ No training CSV files found")
         return created_dirs
 
     for tfidf_idx, tfidf_conf_dict in enumerate(tfidf_configs, 1):
         # Create TF-IDF config
         tfidf_config = TfidfConfig(
-            max_features=tfidf_conf_dict.get(
-                "max_features", config.tfidf_config.max_features
-            ),
-            ngram_range=tfidf_conf_dict.get(
-                "ngram_range", config.tfidf_config.ngram_range
-            ),
+            max_features=tfidf_conf_dict.get("max_features", config.tfidf_config.max_features),
+            ngram_range=tfidf_conf_dict.get("ngram_range", config.tfidf_config.ngram_range),
             min_df=tfidf_conf_dict.get("min_df", config.tfidf_config.min_df),
             max_df=tfidf_conf_dict.get("max_df", config.tfidf_config.max_df),
-            sublinear_tf=tfidf_conf_dict.get(
-                "sublinear_tf", config.tfidf_config.sublinear_tf
-            ),
+            sublinear_tf=tfidf_conf_dict.get("sublinear_tf", config.tfidf_config.sublinear_tf),
         )
 
         config_hash = tfidf_config.get_hash()
@@ -415,11 +379,7 @@ def dry_run_step4_predictions(
                 # Predict on all test files
                 for test_file in test_files:
                     test_dataset_name = test_file.stem
-                    results_dir = (
-                        Path(config.experiment_config.results_dir)
-                        / model_name
-                        / test_dataset_name
-                    )
+                    results_dir = Path(config.experiment_config.results_dir) / model_name / test_dataset_name
 
                     if verbose:
                         print(f"  Test dataset: {test_dataset_name}")
@@ -429,22 +389,22 @@ def dry_run_step4_predictions(
                     create_dummy_file(
                         results_dir / "soft_predictions.json",
                         f"Soft predictions for {test_dataset_name}",
-                        verbose,
+                        verbose
                     )
                     create_dummy_file(
                         results_dir / "argmax_predictions.json",
                         f"Argmax predictions for {test_dataset_name}",
-                        verbose,
+                        verbose
                     )
                     create_dummy_file(
                         results_dir / "rounded_avg_predictions.json",
                         f"Rounded average predictions for {test_dataset_name}",
-                        verbose,
+                        verbose
                     )
                     create_dummy_file(
                         results_dir / "evaluation_report.md",
                         f"Evaluation report for {test_dataset_name}",
-                        verbose,
+                        verbose
                     )
 
                     created_dirs.append(results_dir)
@@ -457,7 +417,7 @@ def run_full_dry_run(
     steps: Optional[List[int]] = None,
     classifiers: Optional[List[str]] = None,
     tfidf_configs: Optional[List[dict]] = None,
-    verbose: bool = True,
+    verbose: bool = True
 ) -> bool:
     """
     Run complete dry run of the pipeline.
@@ -498,9 +458,7 @@ def run_full_dry_run(
 
         # Step 2: Extract Features
         if 2 in steps_to_run:
-            dry_run_step2_features(
-                config, tfidf_configs, data_source="both", verbose=verbose
-            )
+            dry_run_step2_features(config, tfidf_configs, data_source="both", verbose=verbose)
 
         # Step 3: Train Classifiers
         if 3 in steps_to_run:
@@ -517,15 +475,15 @@ def run_full_dry_run(
             print("=" * 70)
             print("\nDummy files created. Directory structure:")
             print(f"\n  {config.experiment_config.experiment_dir}/")
-            print("    feature-models/")
-            print("      <hash>_tfidf/          # TF-IDF models")
-            print("      classifiers/           # Trained classifiers")
-            print("    features/")
-            print("      <hash>_tfidf/          # Extracted features")
-            print("        <dataset>/")
-            print("    results/")
-            print("      <model_name>/          # Prediction results")
-            print("        <dataset>/")
+            print(f"    feature-models/")
+            print(f"      <hash>_tfidf/          # TF-IDF models")
+            print(f"      classifiers/           # Trained classifiers")
+            print(f"    features/")
+            print(f"      <hash>_tfidf/          # Extracted features")
+            print(f"        <dataset>/")
+            print(f"    results/")
+            print(f"      <model_name>/          # Prediction results")
+            print(f"        <dataset>/")
             print("\nTo run the actual pipeline, remove the --dry-run flag.")
             print("=" * 70)
 
@@ -535,7 +493,6 @@ def run_full_dry_run(
         print(f"\n✗ Dry run failed: {e}")
         if verbose:
             import traceback
-
             traceback.print_exc()
         return False
 
@@ -546,38 +503,51 @@ def create_parser() -> argparse.ArgumentParser:
     # So we create a minimal parser here instead
     parser = argparse.ArgumentParser(
         description="Dry Run Mode - Preview pipeline output structure without running actual computations",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     # Experiment configuration
     parser.add_argument(
-        "-e", "--experiment-dir", required=True, help="Path to experiment directory"
+        "-e", "--experiment-dir",
+        required=True,
+        help="Path to experiment directory"
     )
     parser.add_argument(
-        "--classifier", default="xgboost", help="Classifier type (default: xgboost)"
+        "--classifier",
+        default="xgboost",
+        help="Classifier type (default: xgboost)"
     )
     parser.add_argument(
-        "--classifiers", nargs="+", help="Multiple classifiers to train"
+        "--classifiers",
+        nargs="+",
+        help="Multiple classifiers to train"
     )
     parser.add_argument(
         "--max-features",
         type=int,
         default=5000,
-        help="Max TF-IDF features (default: 5000)",
+        help="Max TF-IDF features (default: 5000)"
     )
     parser.add_argument(
-        "--max-features-list", nargs="+", type=int, help="Multiple max_features values"
+        "--max-features-list",
+        nargs="+",
+        type=int,
+        help="Multiple max_features values"
     )
     parser.add_argument(
-        "--steps", nargs="+", help="Pipeline steps to run (default: all)"
+        "--steps",
+        nargs="+",
+        help="Pipeline steps to run (default: all)"
     )
     parser.add_argument(
         "--cefr-column",
         default="cefr_label",
-        help="CEFR column name (default: cefr_label)",
+        help="CEFR column name (default: cefr_label)"
     )
     parser.add_argument(
-        "-q", "--quiet", action="store_true", help="Suppress verbose output"
+        "-q", "--quiet",
+        action="store_true",
+        help="Suppress verbose output"
     )
 
     return parser
@@ -588,14 +558,9 @@ def main():
     parser = create_parser()
     args = parser.parse_args()
 
-    # Build configuration
+    # Build configuration without complex imports
     try:
-        from src.config import (
-            ClassifierConfig,
-            DataConfig,
-            ExperimentConfig,
-            OutputConfig,
-        )
+        from src.config import ExperimentConfig, TfidfConfig, ClassifierConfig, DataConfig, OutputConfig, GlobalConfig
 
         experiment_config = ExperimentConfig(experiment_dir=args.experiment_dir)
         tfidf_config = TfidfConfig(max_features=args.max_features)
@@ -608,7 +573,7 @@ def main():
             tfidf_config,
             classifier_config,
             data_config,
-            output_config,
+            output_config
         )
     except Exception as e:
         parser.error(f"Configuration error: {e}")
@@ -625,16 +590,10 @@ def main():
                 except ValueError:
                     # Map names to numbers
                     step_map = {
-                        "tfidf": 1,
-                        "train-tfidf": 1,
-                        "extract": 2,
-                        "features": 2,
-                        "extract-features": 2,
-                        "train": 3,
-                        "classify": 3,
-                        "train-classifiers": 3,
-                        "predict": 4,
-                        "inference": 4,
+                        "tfidf": 1, "train-tfidf": 1,
+                        "extract": 2, "features": 2, "extract-features": 2,
+                        "train": 3, "classify": 3, "train-classifiers": 3,
+                        "predict": 4, "inference": 4
                     }
                     if step.lower() in step_map:
                         steps.append(step_map[step.lower()])
@@ -667,9 +626,7 @@ def main():
         print()
 
     # Run dry run
-    success = run_full_dry_run(
-        config, steps, classifiers, tfidf_configs, verbose=config.output_config.verbose
-    )
+    success = run_full_dry_run(config, steps, classifiers, tfidf_configs, verbose=config.output_config.verbose)
     return 0 if success else 1
 
 

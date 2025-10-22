@@ -45,17 +45,23 @@ import argparse
 import json
 import pickle
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import List, Optional, Tuple
+
 import numpy as np
 import pandas as pd
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+    precision_recall_fscore_support,
+)
 from sklearn.pipeline import make_pipeline
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-from sklearn.metrics import precision_recall_fscore_support
 
-from src.config import GlobalConfig, ExperimentConfig, DataConfig, OutputConfig
+from src.config import DataConfig, ExperimentConfig, GlobalConfig, OutputConfig
 from src.experiment_structure import validate_experiment_structure
+
 # Import GroupedTfidfVectorizer so pickle can load it
-from src.train_tfidf_groupby import GroupedTfidfVectorizer
+from src.train_tfidf_groupby import GroupedTfidfVectorizer  # noqa: F401
 
 
 class PretrainedTfidfWrapper:
@@ -63,8 +69,9 @@ class PretrainedTfidfWrapper:
     Wrapper for pretrained TfidfVectorizer to work with sklearn make_pipeline API.
     Used with --preprocess-text option.
     """
+
     def __init__(self, model_path: str):
-        with open(model_path, 'rb') as f:
+        with open(model_path, "rb") as f:
             self.vectorizer = pickle.load(f)
 
     def fit(self, X, y=None):
@@ -84,15 +91,16 @@ class PretrainedClassifierWrapper:
     Handles label encoding/decoding for classifiers that use encoded labels.
     Used with --preprocess-text option.
     """
+
     def __init__(self, classifier_dir: Path):
         classifier_path = classifier_dir / "classifier.pkl"
-        with open(classifier_path, 'rb') as f:
+        with open(classifier_path, "rb") as f:
             self.classifier = pickle.load(f)
 
         # Try to load label encoder if it exists
         encoder_path = classifier_dir / "label_encoder.pkl"
         if encoder_path.exists():
-            with open(encoder_path, 'rb') as f:
+            with open(encoder_path, "rb") as f:
                 self.label_encoder = pickle.load(f)
         else:
             # Backward compatibility: old models without label encoder
@@ -112,7 +120,7 @@ class PretrainedClassifierWrapper:
             return y_pred_encoded
 
     def predict_proba(self, X):
-        if hasattr(self.classifier, 'predict_proba'):
+        if hasattr(self.classifier, "predict_proba"):
             return self.classifier.predict_proba(X)
         raise AttributeError("Classifier does not support predict_proba")
 
@@ -131,14 +139,14 @@ def load_classifier_and_encoder(classifier_dir: Path) -> Tuple:
     if not classifier_path.exists():
         raise FileNotFoundError(f"Classifier not found: {classifier_path}")
 
-    with open(classifier_path, 'rb') as f:
+    with open(classifier_path, "rb") as f:
         classifier = pickle.load(f)
 
     # Load label encoder if it exists
     encoder_path = classifier_dir / "label_encoder.pkl"
     label_encoder = None
     if encoder_path.exists():
-        with open(encoder_path, 'rb') as f:
+        with open(encoder_path, "rb") as f:
             label_encoder = pickle.load(f)
 
     return classifier, label_encoder
@@ -149,7 +157,7 @@ def load_features_and_labels(
     labels_file: Optional[str] = None,
     labels_csv: Optional[str] = None,
     cefr_column: str = "cefr_label",
-    verbose: bool = True
+    verbose: bool = True,
 ) -> Tuple[np.ndarray, Optional[np.ndarray], Optional[pd.Series]]:
     """
     Load pre-extracted features and optional labels for evaluation.
@@ -179,7 +187,7 @@ def load_features_and_labels(
         if verbose:
             print(f"Loading labels from: {labels_file}")
 
-        with open(labels_file, 'r') as f:
+        with open(labels_file, "r") as f:
             y_test = np.array([line.strip() for line in f if line.strip()])
         y_test_series = pd.Series(y_test)
 
@@ -213,7 +221,7 @@ def cefr_classification_report(
     y_pred: np.ndarray,
     labels: Optional[List] = None,
     target_names: Optional[List[str]] = None,
-    digits: int = 2
+    digits: int = 2,
 ) -> str:
     """
     Custom CEFR multiclass classification report.
@@ -244,10 +252,12 @@ def cefr_classification_report(
 
     # Calculate macro and weighted averages
     macro_precision, macro_recall, macro_f1, _ = precision_recall_fscore_support(
-        y_true, y_pred, labels=labels, average='macro', zero_division=0
+        y_true, y_pred, labels=labels, average="macro", zero_division=0
     )
-    weighted_precision, weighted_recall, weighted_f1, _ = precision_recall_fscore_support(
-        y_true, y_pred, labels=labels, average='weighted', zero_division=0
+    weighted_precision, weighted_recall, weighted_f1, _ = (
+        precision_recall_fscore_support(
+            y_true, y_pred, labels=labels, average="weighted", zero_division=0
+        )
     )
 
     # Calculate accuracy
@@ -262,12 +272,14 @@ def cefr_classification_report(
     adjacent_accuracy = np.mean(adjacent_correct[y_true_idx >= 0])
 
     # Build report string
-    headers = ['precision', 'recall', 'f1-score', 'support']
-    head_fmt = '{:>{width}s} ' + ' {:>9}' * len(headers)
-    report = head_fmt.format('', *headers, width=max(len(name) for name in target_names))
-    report += '\n\n'
+    headers = ["precision", "recall", "f1-score", "support"]
+    head_fmt = "{:>{width}s} " + " {:>9}" * len(headers)
+    report = head_fmt.format(
+        "", *headers, width=max(len(name) for name in target_names)
+    )
+    report += "\n\n"
 
-    row_fmt = '{:>{width}s} ' + ' {:>9.{digits}f}' * 3 + ' {:>9}\n'
+    row_fmt = "{:>{width}s} " + " {:>9.{digits}f}" * 3 + " {:>9}\n"
 
     # Per-class rows
     for i, label in enumerate(labels):
@@ -278,35 +290,35 @@ def cefr_classification_report(
             f1[i],
             int(support[i]),
             width=max(len(name) for name in target_names),
-            digits=digits
+            digits=digits,
         )
 
-    report += '\n'
+    report += "\n"
 
     # Macro average
     report += row_fmt.format(
-        'macro avg',
+        "macro avg",
         macro_precision,
         macro_recall,
         macro_f1,
         int(np.sum(support)),
         width=max(len(name) for name in target_names),
-        digits=digits
+        digits=digits,
     )
 
     # Weighted average
     report += row_fmt.format(
-        'weighted avg',
+        "weighted avg",
         weighted_precision,
         weighted_recall,
         weighted_f1,
         int(np.sum(support)),
         width=max(len(name) for name in target_names),
-        digits=digits
+        digits=digits,
     )
 
     # Add CEFR-specific metrics
-    report += '\n'
+    report += "\n"
     report += f"{'accuracy':{max(len(name) for name in target_names)}s} "
     report += f"{accuracy:>9.{digits}f}"
     report += f" {int(np.sum(support)):>9}\n"
@@ -324,7 +336,7 @@ def cefr_calibration_report(
     labels: Optional[List] = None,
     target_names: Optional[List[str]] = None,
     n_bins: int = 10,
-    digits: int = 2
+    digits: int = 2,
 ) -> str:
     """
     Custom CEFR calibration report for soft probabilities.
@@ -349,8 +361,8 @@ def cefr_calibration_report(
     if target_names is None:
         target_names = [str(label) for label in labels]
 
-    # Map labels to indices
-    label_to_idx = {label: idx for idx, label in enumerate(labels)}
+    # Map labels to indices (not used but kept for reference)
+    # label_to_idx = {label: idx for idx, label in enumerate(labels)}
 
     # Get predicted class (argmax of probabilities)
     y_pred_idx = np.argmax(y_pred_proba, axis=1)
@@ -378,21 +390,25 @@ def cefr_calibration_report(
 
             ece += np.abs(avg_confidence_in_bin - accuracy_in_bin) * prop_in_bin
 
-            bin_stats.append({
-                'range': f"({bin_lower:.2f}, {bin_upper:.2f}]",
-                'count': int(np.sum(in_bin)),
-                'accuracy': accuracy_in_bin,
-                'confidence': avg_confidence_in_bin,
-                'calibration_gap': avg_confidence_in_bin - accuracy_in_bin
-            })
+            bin_stats.append(
+                {
+                    "range": f"({bin_lower:.2f}, {bin_upper:.2f}]",
+                    "count": int(np.sum(in_bin)),
+                    "accuracy": accuracy_in_bin,
+                    "confidence": avg_confidence_in_bin,
+                    "calibration_gap": avg_confidence_in_bin - accuracy_in_bin,
+                }
+            )
         else:
-            bin_stats.append({
-                'range': f"({bin_lower:.2f}, {bin_upper:.2f}]",
-                'count': 0,
-                'accuracy': 0.0,
-                'confidence': 0.0,
-                'calibration_gap': 0.0
-            })
+            bin_stats.append(
+                {
+                    "range": f"({bin_lower:.2f}, {bin_upper:.2f}]",
+                    "count": 0,
+                    "accuracy": 0.0,
+                    "confidence": 0.0,
+                    "calibration_gap": 0.0,
+                }
+            )
 
     # Build report
     report = "CEFR CALIBRATION REPORT (Soft Probabilities)\n"
@@ -402,11 +418,13 @@ def cefr_calibration_report(
 
     # Bin statistics
     report += "Confidence Bins:\n"
-    report += f"{'Range':<20} {'Count':>10} {'Accuracy':>12} {'Confidence':>12} {'Gap':>12}\n"
+    report += (
+        f"{'Range':<20} {'Count':>10} {'Accuracy':>12} {'Confidence':>12} {'Gap':>12}\n"
+    )
     report += "-" * 80 + "\n"
 
     for stat in bin_stats:
-        if stat['count'] > 0:
+        if stat["count"] > 0:
             report += f"{stat['range']:<20} {stat['count']:>10} "
             report += f"{stat['accuracy']:>12.{digits}f} "
             report += f"{stat['confidence']:>12.{digits}f} "
@@ -433,12 +451,12 @@ def cefr_calibration_report(
     return report
 
 
-def predict_on_features(
+def predict_on_features(  # noqa: C901
     config: GlobalConfig,
     classifier_model_name: str,
     features_file: str,
     labels_file: Optional[str] = None,
-    labels_csv: Optional[str] = None
+    labels_csv: Optional[str] = None,
 ) -> Tuple[Optional[np.ndarray], np.ndarray]:
     """
     Make predictions on pre-extracted features.
@@ -469,11 +487,11 @@ def predict_on_features(
 
     if classifier_config_path.exists():
         try:
-            with open(classifier_config_path, 'r') as f:
+            with open(classifier_config_path, "r") as f:
                 clf_cfg = json.load(f)
                 expected_feature_type = clf_cfg.get("feature_type")
                 expected_config_hash = clf_cfg.get("config_hash")
-        except:
+        except Exception:
             pass
 
     if verbose:
@@ -492,7 +510,7 @@ def predict_on_features(
         labels_file=labels_file,
         labels_csv=labels_csv,
         cefr_column=data_config.cefr_column,
-        verbose=verbose
+        verbose=verbose,
     )
 
     # Make predictions
@@ -509,12 +527,14 @@ def predict_on_features(
 
     # Get probabilities if available
     y_pred_proba = None
-    if hasattr(classifier, 'predict_proba'):
+    if hasattr(classifier, "predict_proba"):
         try:
             y_pred_proba = classifier.predict_proba(X_test)
         except (AttributeError, NotImplementedError):
             if verbose:
-                print("Note: Classifier does not support predict_proba, skipping calibration report")
+                print(
+                    "Note: Classifier does not support predict_proba, skipping calibration report"
+                )
 
     # Get full model class list (needed for calibration and results saving)
     if label_encoder is not None:
@@ -534,12 +554,14 @@ def predict_on_features(
         print("\n" + "=" * 80)
         print("CEFR CLASSIFICATION REPORT (Multiclass)")
         print("=" * 80)
-        print(cefr_classification_report(
-            y_test,
-            y_pred,
-            labels=labels_list,
-            target_names=[str(l) for l in labels_list]
-        ))
+        print(
+            cefr_classification_report(
+                y_test,
+                y_pred,
+                labels=labels_list,
+                target_names=[str(label) for label in labels_list],
+            )
+        )
 
         print("\n" + "=" * 80)
         print("STANDARD CLASSIFICATION REPORT")
@@ -556,12 +578,14 @@ def predict_on_features(
         # Print calibration report if probabilities available
         if y_pred_proba is not None:
             print("\n" + "=" * 80)
-            print(cefr_calibration_report(
-                y_test,
-                y_pred_proba,
-                labels=model_classes,  # Use full model classes, not just test labels
-                target_names=[str(l) for l in model_classes]
-            ))
+            print(
+                cefr_calibration_report(
+                    y_test,
+                    y_pred_proba,
+                    labels=model_classes,  # Use full model classes, not just test labels
+                    target_names=[str(label) for label in model_classes],
+                )
+            )
             print("=" * 80)
 
     # Save results organized by model, then by dataset
@@ -575,7 +599,9 @@ def predict_on_features(
 
         # Organize results by: model/dataset/
         # This prevents overwrites when same dataset is used with different TF-IDF configs or classifiers
-        results_dir = Path(exp_config.results_dir) / classifier_model_name / dataset_name
+        results_dir = (
+            Path(exp_config.results_dir) / classifier_model_name / dataset_name
+        )
         results_dir.mkdir(parents=True, exist_ok=True)
 
         # Determine actual classes from probability array shape
@@ -592,25 +618,24 @@ def predict_on_features(
             for i in range(len(y_pred_proba)):
                 pred_dict = {
                     "sample_id": i,
-                    "probabilities": {str(cls): float(y_pred_proba[i][j])
-                                     for j, cls in enumerate(proba_classes)}
+                    "probabilities": {
+                        str(cls): float(y_pred_proba[i][j])
+                        for j, cls in enumerate(proba_classes)
+                    },
                 }
                 if y_test is not None:
                     pred_dict["true_label"] = str(y_test[i])
                 soft_predictions.append(pred_dict)
 
             soft_pred_path = results_dir / "soft_predictions.json"
-            with open(soft_pred_path, 'w') as f:
+            with open(soft_pred_path, "w") as f:
                 json.dump(soft_predictions, f, indent=2)
 
         # Save argmax predictions
         if config.output_config.save_json:
             argmax_predictions = []
             for i in range(len(y_pred)):
-                pred_dict = {
-                    "sample_id": i,
-                    "predicted_label": str(y_pred[i])
-                }
+                pred_dict = {"sample_id": i, "predicted_label": str(y_pred[i])}
                 if y_test is not None:
                     pred_dict["true_label"] = str(y_test[i])
                 if y_pred_proba is not None:
@@ -618,7 +643,7 @@ def predict_on_features(
                 argmax_predictions.append(pred_dict)
 
             argmax_pred_path = results_dir / "argmax_predictions.json"
-            with open(argmax_pred_path, 'w') as f:
+            with open(argmax_pred_path, "w") as f:
                 json.dump(argmax_predictions, f, indent=2)
 
         # Save rounded average predictions (regression-style)
@@ -626,13 +651,15 @@ def predict_on_features(
             rounded_avg_predictions = []
 
             # Map classes to numeric values (based on actual proba classes)
-            class_to_idx = {cls: idx for idx, cls in enumerate(proba_classes)}
+            # class_to_idx = {cls: idx for idx, cls in enumerate(proba_classes)}
             idx_to_class = {idx: cls for idx, cls in enumerate(proba_classes)}
 
             y_pred_rounded_avg = []
             for i in range(len(y_pred_proba)):
                 # Calculate expected value (weighted average of class indices)
-                expected_idx = np.sum([j * y_pred_proba[i][j] for j in range(len(proba_classes))])
+                expected_idx = np.sum(
+                    [j * y_pred_proba[i][j] for j in range(len(proba_classes))]
+                )
                 # Round to nearest integer index
                 rounded_idx = int(np.round(expected_idx))
                 # Clip to valid range
@@ -645,14 +672,14 @@ def predict_on_features(
                     "sample_id": i,
                     "predicted_label": str(pred_label),
                     "expected_value": float(expected_idx),
-                    "rounded_index": int(rounded_idx)
+                    "rounded_index": int(rounded_idx),
                 }
                 if y_test is not None:
                     pred_dict["true_label"] = str(y_test[i])
                 rounded_avg_predictions.append(pred_dict)
 
             rounded_avg_path = results_dir / "rounded_avg_predictions.json"
-            with open(rounded_avg_path, 'w') as f:
+            with open(rounded_avg_path, "w") as f:
                 json.dump(rounded_avg_predictions, f, indent=2)
 
             # Generate reports for rounded average strategy
@@ -664,34 +691,42 @@ def predict_on_features(
                 print("=" * 80)
 
                 print("\nCEFR CLASSIFICATION REPORT (Rounded Avg):")
-                print(cefr_classification_report(
-                    y_test,
-                    y_pred_rounded_avg,
-                    labels=labels_list,
-                    target_names=[str(l) for l in labels_list]
-                ))
+                print(
+                    cefr_classification_report(
+                        y_test,
+                        y_pred_rounded_avg,
+                        labels=labels_list,
+                        target_names=[str(label) for label in labels_list],
+                    )
+                )
 
         # Save markdown reports
         if y_test is not None:
             report_path = results_dir / "evaluation_report.md"
-            with open(report_path, 'w') as f:
+            with open(report_path, "w") as f:
                 f.write(f"# Evaluation Report: {dataset_name}\n\n")
                 f.write(f"**Classifier**: {classifier_model_name}\n")
                 f.write(f"**Dataset**: {dataset_name}\n")
                 f.write(f"**Samples**: {len(y_test)}\n")
-                f.write(f"**Classes in test set**: {', '.join(map(str, labels_list))}\n\n")
+                f.write(
+                    f"**Classes in test set**: {', '.join(map(str, labels_list))}\n\n"
+                )
 
                 # Argmax strategy
                 f.write("## Strategy 1: Argmax Predictions\n\n")
-                f.write("Standard argmax strategy: predict class with highest probability.\n\n")
+                f.write(
+                    "Standard argmax strategy: predict class with highest probability.\n\n"
+                )
                 f.write("### CEFR Classification Report\n\n")
                 f.write("```\n")
-                f.write(cefr_classification_report(
-                    y_test,
-                    y_pred,
-                    labels=labels_list,
-                    target_names=[str(l) for l in labels_list]
-                ))
+                f.write(
+                    cefr_classification_report(
+                        y_test,
+                        y_pred,
+                        labels=labels_list,
+                        target_names=[str(label) for label in labels_list],
+                    )
+                )
                 f.write("```\n\n")
 
                 f.write("### Standard Classification Report\n\n")
@@ -710,38 +745,50 @@ def predict_on_features(
                 if y_pred_proba is not None:
                     f.write("### Calibration Report\n\n")
                     f.write("```\n")
-                    f.write(cefr_calibration_report(
-                        y_test,
-                        y_pred_proba,
-                        labels=model_classes,
-                        target_names=[str(l) for l in model_classes]
-                    ))
+                    f.write(
+                        cefr_calibration_report(
+                            y_test,
+                            y_pred_proba,
+                            labels=model_classes,
+                            target_names=[str(label) for label in model_classes],
+                        )
+                    )
                     f.write("```\n\n")
 
                 # Rounded average strategy
                 if y_pred_proba is not None:
                     f.write("## Strategy 2: Rounded Average Predictions\n\n")
-                    f.write("Regression-style strategy: calculate expected class index from probabilities, ")
+                    f.write(
+                        "Regression-style strategy: calculate expected class index from probabilities, "
+                    )
                     f.write("round to nearest integer, map back to class label.\n\n")
                     f.write("### CEFR Classification Report\n\n")
                     f.write("```\n")
-                    f.write(cefr_classification_report(
-                        y_test,
-                        y_pred_rounded_avg,
-                        labels=labels_list,
-                        target_names=[str(l) for l in labels_list]
-                    ))
+                    f.write(
+                        cefr_classification_report(
+                            y_test,
+                            y_pred_rounded_avg,
+                            labels=labels_list,
+                            target_names=[str(label) for label in labels_list],
+                        )
+                    )
                     f.write("```\n\n")
 
                     f.write("### Standard Classification Report\n\n")
                     f.write("```\n")
-                    f.write(classification_report(y_test, y_pred_rounded_avg, zero_division=0))
+                    f.write(
+                        classification_report(
+                            y_test, y_pred_rounded_avg, zero_division=0
+                        )
+                    )
                     f.write("```\n\n")
 
                     f.write("### Confusion Matrix\n\n")
                     f.write(f"Labels (rows=true, cols=pred): {labels_list}\n\n")
                     f.write("```\n")
-                    cm_rounded = confusion_matrix(y_test, y_pred_rounded_avg, labels=labels_list)
+                    cm_rounded = confusion_matrix(
+                        y_test, y_pred_rounded_avg, labels=labels_list
+                    )
                     f.write(str(cm_rounded))
                     f.write("\n```\n\n")
 
@@ -749,12 +796,12 @@ def predict_on_features(
             print(f"\n✓ Results saved to: {results_dir}/")
             if config.output_config.save_json:
                 if y_pred_proba is not None:
-                    print(f"  - soft_predictions.json")
-                print(f"  - argmax_predictions.json")
+                    print("  - soft_predictions.json")
+                print("  - argmax_predictions.json")
                 if y_pred_proba is not None:
-                    print(f"  - rounded_avg_predictions.json")
+                    print("  - rounded_avg_predictions.json")
             if y_test is not None:
-                print(f"  - evaluation_report.md")
+                print("  - evaluation_report.md")
 
     return y_test, y_pred
 
@@ -775,9 +822,10 @@ def extract_config_hash_from_model_name(model_name: str) -> Optional[str]:
         Config hash with feature type suffix, or None if pattern doesn't match
     """
     import re
+
     # Pattern: anything followed by underscore, 8-char hex hash, underscore, feature type
     # Feature type can be: tfidf, tfidf_grouped, etc.
-    pattern = r'_([0-9a-f]{8})_(tfidf(?:_grouped)?)'
+    pattern = r"_([0-9a-f]{8})_(tfidf(?:_grouped)?)"
     match = re.search(pattern, model_name)
     if match:
         config_hash = match.group(1)
@@ -786,7 +834,7 @@ def extract_config_hash_from_model_name(model_name: str) -> Optional[str]:
     return None
 
 
-def predict_all_models_batch(
+def predict_all_models_batch(  # noqa: C901
     config: GlobalConfig,
     models_dir: str,
     features_dir: str,
@@ -853,14 +901,18 @@ def predict_all_models_batch(
 
         if not feature_key:
             if verbose:
-                print(f"\n✗ Skipping {model_name}: Could not extract config hash from model name")
+                print(
+                    f"\n✗ Skipping {model_name}: Could not extract config hash from model name"
+                )
             unmatched_count += 1
             continue
 
         # Find matching feature directory
         if feature_key not in feature_dirs_map:
             if verbose:
-                print(f"\n✗ Skipping {model_name}: No matching feature directory for '{feature_key}'")
+                print(
+                    f"\n✗ Skipping {model_name}: No matching feature directory for '{feature_key}'"
+                )
             unmatched_count += 1
             continue
 
@@ -871,7 +923,9 @@ def predict_all_models_batch(
 
         if not dataset_subdirs:
             if verbose:
-                print(f"\n✗ Skipping {model_name}: No dataset subdirectories found in {feature_dir}")
+                print(
+                    f"\n✗ Skipping {model_name}: No dataset subdirectories found in {feature_dir}"
+                )
             unmatched_count += 1
             continue
 
@@ -879,10 +933,14 @@ def predict_all_models_batch(
 
         if verbose:
             print(f"\n{'=' * 70}")
-            print(f"Processing model {matched_count}/{len(model_subdirs)}: {model_name}")
+            print(
+                f"Processing model {matched_count}/{len(model_subdirs)}: {model_name}"
+            )
             print(f"  Config hash: {feature_key}")
             print(f"  Feature dir: {feature_dir.name}")
-            print(f"  Found {len(dataset_subdirs)} dataset(s): {[d.name for d in dataset_subdirs]}")
+            print(
+                f"  Found {len(dataset_subdirs)} dataset(s): {[d.name for d in dataset_subdirs]}"
+            )
             print("-" * 70)
 
         # Process each dataset subdirectory
@@ -892,7 +950,9 @@ def predict_all_models_batch(
 
             if not features_file.exists():
                 if verbose:
-                    print(f"\n  ✗ Skipping dataset {dataset_name}: features_dense.csv not found")
+                    print(
+                        f"\n  ✗ Skipping dataset {dataset_name}: features_dense.csv not found"
+                    )
                 continue
 
             if verbose:
@@ -909,11 +969,13 @@ def predict_all_models_batch(
                 if training_labels_csv.exists():
                     labels_csv = training_labels_csv
                     if verbose:
-                        print(f"    Using labels from training data: {training_labels_csv.name}")
+                        print(
+                            f"    Using labels from training data: {training_labels_csv.name}"
+                        )
                 else:
                     if verbose:
                         print(
-                            f"    ⚠ Labels CSV not found in test or training data (predictions only, no evaluation)"
+                            "    ⚠ Labels CSV not found in test or training data (predictions only, no evaluation)"
                         )
                     labels_csv = None
 
@@ -929,11 +991,12 @@ def predict_all_models_batch(
                 print(f"    ✗ Error processing {dataset_name}: {e}")
                 if verbose:
                     import traceback
+
                     traceback.print_exc()
 
     if verbose:
         print(f"\n{'=' * 70}")
-        print(f"Batch processing complete:")
+        print("Batch processing complete:")
         print(f"  Successfully processed: {matched_count}")
         print(f"  Skipped/Failed: {unmatched_count}")
         print("=" * 70)
@@ -941,11 +1004,11 @@ def predict_all_models_batch(
     return results
 
 
-def predict_all_feature_sets(
+def predict_all_feature_sets(  # noqa: C901
     config: GlobalConfig,
     classifier_model_name: str,
     features_dir: str,
-    labels_csv_dir: Optional[str] = None
+    labels_csv_dir: Optional[str] = None,
 ) -> List[Tuple]:
     """
     Run predictions for all feature sets in a directory.
@@ -999,14 +1062,20 @@ def predict_all_feature_sets(
 
         if not labels_csv.exists():
             # Try training data directory
-            training_labels_csv = Path(exp_config.ml_training_dir) / f"{feature_subdir.name}.csv"
+            training_labels_csv = (
+                Path(exp_config.ml_training_dir) / f"{feature_subdir.name}.csv"
+            )
             if training_labels_csv.exists():
                 labels_csv = training_labels_csv
                 if verbose:
-                    print(f"  Using labels from training data: {training_labels_csv.name}")
+                    print(
+                        f"  Using labels from training data: {training_labels_csv.name}"
+                    )
             else:
                 if verbose:
-                    print(f"⚠ Labels CSV not found in test or training data (predictions only, no evaluation)")
+                    print(
+                        "⚠ Labels CSV not found in test or training data (predictions only, no evaluation)"
+                    )
                 labels_csv = None
 
         try:
@@ -1014,22 +1083,21 @@ def predict_all_feature_sets(
                 config,
                 classifier_model_name=classifier_model_name,
                 features_file=str(features_file),
-                labels_csv=str(labels_csv) if labels_csv else None
+                labels_csv=str(labels_csv) if labels_csv else None,
             )
             results.append((y_test, y_pred))
         except Exception as e:
             print(f"✗ Error: {e}")
             if verbose:
                 import traceback
+
                 traceback.print_exc()
 
     return results
 
 
-def predict_with_text_pipeline(
-    config: GlobalConfig,
-    classifier_model_name: str,
-    test_file: str
+def predict_with_text_pipeline(  # noqa: C901
+    config: GlobalConfig, classifier_model_name: str, test_file: str
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Make predictions using TF-IDF pipeline with raw text (legacy mode).
@@ -1075,12 +1143,16 @@ def predict_with_text_pipeline(
 
     # Validate columns
     if data_config.text_column not in df_test.columns:
-        raise ValueError(f"Text column '{data_config.text_column}' not found in {test_file_path}")
+        raise ValueError(
+            f"Text column '{data_config.text_column}' not found in {test_file_path}"
+        )
 
     if data_config.label_column not in df_test.columns:
-        raise ValueError(f"Label column '{data_config.label_column}' not found in {test_file_path}")
+        raise ValueError(
+            f"Label column '{data_config.label_column}' not found in {test_file_path}"
+        )
 
-    X_test = df_test[data_config.text_column].fillna('').astype(str)
+    X_test = df_test[data_config.text_column].fillna("").astype(str)
     y_test = df_test[data_config.label_column].values
 
     if verbose:
@@ -1093,7 +1165,7 @@ def predict_with_text_pipeline(
 
     pipeline = make_pipeline(
         PretrainedTfidfWrapper(str(tfidf_model_path)),
-        PretrainedClassifierWrapper(classifier_dir)
+        PretrainedClassifierWrapper(classifier_dir),
     )
 
     # Make predictions
@@ -1108,7 +1180,9 @@ def predict_with_text_pipeline(
         y_pred_proba = pipeline.predict_proba(X_test)
     except (AttributeError, NotImplementedError):
         if verbose:
-            print("Note: Classifier does not support predict_proba, skipping calibration report")
+            print(
+                "Note: Classifier does not support predict_proba, skipping calibration report"
+            )
 
     # Print evaluation reports
     if verbose:
@@ -1116,7 +1190,10 @@ def predict_with_text_pipeline(
 
         # Get full model class list from the classifier wrapper (for calibration report)
         classifier_wrapper = pipeline.steps[-1][1]
-        if hasattr(classifier_wrapper, 'label_encoder') and classifier_wrapper.label_encoder is not None:
+        if (
+            hasattr(classifier_wrapper, "label_encoder")
+            and classifier_wrapper.label_encoder is not None
+        ):
             model_classes = classifier_wrapper.label_encoder.classes_.tolist()
         else:
             model_classes = labels_list
@@ -1124,12 +1201,14 @@ def predict_with_text_pipeline(
         print("\n" + "=" * 80)
         print("CEFR CLASSIFICATION REPORT (Multiclass)")
         print("=" * 80)
-        print(cefr_classification_report(
-            y_test,
-            y_pred,
-            labels=labels_list,
-            target_names=[str(l) for l in labels_list]
-        ))
+        print(
+            cefr_classification_report(
+                y_test,
+                y_pred,
+                labels=labels_list,
+                target_names=[str(label) for label in labels_list],
+            )
+        )
 
         print("\n" + "=" * 80)
         print("STANDARD CLASSIFICATION REPORT")
@@ -1146,12 +1225,14 @@ def predict_with_text_pipeline(
         # Print calibration report if probabilities available
         if y_pred_proba is not None:
             print("\n" + "=" * 80)
-            print(cefr_calibration_report(
-                y_test,
-                y_pred_proba,
-                labels=model_classes,  # Use full model classes, not just test labels
-                target_names=[str(l) for l in model_classes]
-            ))
+            print(
+                cefr_calibration_report(
+                    y_test,
+                    y_pred_proba,
+                    labels=model_classes,  # Use full model classes, not just test labels
+                    target_names=[str(label) for label in model_classes],
+                )
+            )
             print("=" * 80)
 
     # Save results organized by dataset
@@ -1174,14 +1255,16 @@ def predict_with_text_pipeline(
             for i in range(len(y_pred_proba)):
                 pred_dict = {
                     "sample_id": i,
-                    "probabilities": {str(cls): float(y_pred_proba[i][j])
-                                     for j, cls in enumerate(proba_classes)}
+                    "probabilities": {
+                        str(cls): float(y_pred_proba[i][j])
+                        for j, cls in enumerate(proba_classes)
+                    },
                 }
                 pred_dict["true_label"] = str(y_test[i])
                 soft_predictions.append(pred_dict)
 
             soft_pred_path = results_dir / "soft_predictions.json"
-            with open(soft_pred_path, 'w') as f:
+            with open(soft_pred_path, "w") as f:
                 json.dump(soft_predictions, f, indent=2)
 
         # Save argmax predictions
@@ -1191,14 +1274,14 @@ def predict_with_text_pipeline(
                 pred_dict = {
                     "sample_id": i,
                     "predicted_label": str(y_pred[i]),
-                    "true_label": str(y_test[i])
+                    "true_label": str(y_test[i]),
                 }
                 if y_pred_proba is not None:
                     pred_dict["confidence"] = float(np.max(y_pred_proba[i]))
                 argmax_predictions.append(pred_dict)
 
             argmax_pred_path = results_dir / "argmax_predictions.json"
-            with open(argmax_pred_path, 'w') as f:
+            with open(argmax_pred_path, "w") as f:
                 json.dump(argmax_predictions, f, indent=2)
 
         # Save rounded average predictions (regression-style)
@@ -1206,13 +1289,15 @@ def predict_with_text_pipeline(
             rounded_avg_predictions = []
 
             # Map classes to numeric values (based on actual proba classes)
-            class_to_idx = {cls: idx for idx, cls in enumerate(proba_classes)}
+            # class_to_idx = {cls: idx for idx, cls in enumerate(proba_classes)}
             idx_to_class = {idx: cls for idx, cls in enumerate(proba_classes)}
 
             y_pred_rounded_avg = []
             for i in range(len(y_pred_proba)):
                 # Calculate expected value (weighted average of class indices)
-                expected_idx = np.sum([j * y_pred_proba[i][j] for j in range(len(proba_classes))])
+                expected_idx = np.sum(
+                    [j * y_pred_proba[i][j] for j in range(len(proba_classes))]
+                )
                 # Round to nearest integer index
                 rounded_idx = int(np.round(expected_idx))
                 # Clip to valid range
@@ -1226,12 +1311,12 @@ def predict_with_text_pipeline(
                     "predicted_label": str(pred_label),
                     "expected_value": float(expected_idx),
                     "rounded_index": int(rounded_idx),
-                    "true_label": str(y_test[i])
+                    "true_label": str(y_test[i]),
                 }
                 rounded_avg_predictions.append(pred_dict)
 
             rounded_avg_path = results_dir / "rounded_avg_predictions.json"
-            with open(rounded_avg_path, 'w') as f:
+            with open(rounded_avg_path, "w") as f:
                 json.dump(rounded_avg_predictions, f, indent=2)
 
             # Generate reports for rounded average strategy
@@ -1243,16 +1328,18 @@ def predict_with_text_pipeline(
                 print("=" * 80)
 
                 print("\nCEFR CLASSIFICATION REPORT (Rounded Avg):")
-                print(cefr_classification_report(
-                    y_test,
-                    y_pred_rounded_avg,
-                    labels=labels_list,
-                    target_names=[str(l) for l in labels_list]
-                ))
+                print(
+                    cefr_classification_report(
+                        y_test,
+                        y_pred_rounded_avg,
+                        labels=labels_list,
+                        target_names=[str(label) for label in labels_list],
+                    )
+                )
 
         # Save markdown reports
         report_path = results_dir / "evaluation_report.md"
-        with open(report_path, 'w') as f:
+        with open(report_path, "w") as f:
             f.write(f"# Evaluation Report: {dataset_name}\n\n")
             f.write(f"**Classifier**: {classifier_model_name}\n")
             f.write(f"**Dataset**: {dataset_name}\n")
@@ -1261,15 +1348,19 @@ def predict_with_text_pipeline(
 
             # Argmax strategy
             f.write("## Strategy 1: Argmax Predictions\n\n")
-            f.write("Standard argmax strategy: predict class with highest probability.\n\n")
+            f.write(
+                "Standard argmax strategy: predict class with highest probability.\n\n"
+            )
             f.write("### CEFR Classification Report\n\n")
             f.write("```\n")
-            f.write(cefr_classification_report(
-                y_test,
-                y_pred,
-                labels=labels_list,
-                target_names=[str(l) for l in labels_list]
-            ))
+            f.write(
+                cefr_classification_report(
+                    y_test,
+                    y_pred,
+                    labels=labels_list,
+                    target_names=[str(label) for label in labels_list],
+                )
+            )
             f.write("```\n\n")
 
             f.write("### Standard Classification Report\n\n")
@@ -1288,38 +1379,48 @@ def predict_with_text_pipeline(
             if y_pred_proba is not None:
                 f.write("### Calibration Report\n\n")
                 f.write("```\n")
-                f.write(cefr_calibration_report(
-                    y_test,
-                    y_pred_proba,
-                    labels=model_classes,
-                    target_names=[str(l) for l in model_classes]
-                ))
+                f.write(
+                    cefr_calibration_report(
+                        y_test,
+                        y_pred_proba,
+                        labels=model_classes,
+                        target_names=[str(label) for label in model_classes],
+                    )
+                )
                 f.write("```\n\n")
 
             # Rounded average strategy
             if y_pred_proba is not None:
                 f.write("## Strategy 2: Rounded Average Predictions\n\n")
-                f.write("Regression-style strategy: calculate expected class index from probabilities, ")
+                f.write(
+                    "Regression-style strategy: calculate expected class index from probabilities, "
+                )
                 f.write("round to nearest integer, map back to class label.\n\n")
                 f.write("### CEFR Classification Report\n\n")
                 f.write("```\n")
-                f.write(cefr_classification_report(
-                    y_test,
-                    y_pred_rounded_avg,
-                    labels=labels_list,
-                    target_names=[str(l) for l in labels_list]
-                ))
+                f.write(
+                    cefr_classification_report(
+                        y_test,
+                        y_pred_rounded_avg,
+                        labels=labels_list,
+                        target_names=[str(label) for label in labels_list],
+                    )
+                )
                 f.write("```\n\n")
 
                 f.write("### Standard Classification Report\n\n")
                 f.write("```\n")
-                f.write(classification_report(y_test, y_pred_rounded_avg, zero_division=0))
+                f.write(
+                    classification_report(y_test, y_pred_rounded_avg, zero_division=0)
+                )
                 f.write("```\n\n")
 
                 f.write("### Confusion Matrix\n\n")
                 f.write(f"Labels (rows=true, cols=pred): {labels_list}\n\n")
                 f.write("```\n")
-                cm_rounded = confusion_matrix(y_test, y_pred_rounded_avg, labels=labels_list)
+                cm_rounded = confusion_matrix(
+                    y_test, y_pred_rounded_avg, labels=labels_list
+                )
                 f.write(str(cm_rounded))
                 f.write("\n```\n\n")
 
@@ -1327,11 +1428,11 @@ def predict_with_text_pipeline(
             print(f"\n✓ Results saved to: {results_dir}/")
             if config.output_config.save_json:
                 if y_pred_proba is not None:
-                    print(f"  - soft_predictions.json")
-                print(f"  - argmax_predictions.json")
+                    print("  - soft_predictions.json")
+                print("  - argmax_predictions.json")
                 if y_pred_proba is not None:
-                    print(f"  - rounded_avg_predictions.json")
-            print(f"  - evaluation_report.md")
+                    print("  - rounded_avg_predictions.json")
+            print("  - evaluation_report.md")
 
     return y_test, y_pred
 
@@ -1340,37 +1441,38 @@ def create_parser() -> argparse.ArgumentParser:
     """Create argument parser for predict."""
     parser = argparse.ArgumentParser(
         description="Make predictions using pretrained classifiers (default: pre-extracted features, optional: --preprocess-text for raw text)",
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
     # Config loading
     config_group = parser.add_argument_group("Configuration Loading")
     config_method = config_group.add_mutually_exclusive_group()
     config_method.add_argument(
-        "-c", "--config-file",
-        help="Path to JSON or YAML config file"
+        "-c", "--config-file", help="Path to JSON or YAML config file"
     )
     config_method.add_argument(
-        "--config-json",
-        help="JSON string containing full configuration"
+        "--config-json", help="JSON string containing full configuration"
     )
 
     # Experiment configuration
     exp_group = parser.add_argument_group("Experiment Configuration")
     exp_group.add_argument(
-        "-e", "--experiment-dir",
-        help="Path to experiment directory (e.g., data/experiments/zero-shot)"
+        "-e",
+        "--experiment-dir",
+        help="Path to experiment directory (e.g., data/experiments/zero-shot)",
     )
     exp_group.add_argument(
-        "-o", "--output-dir",
-        help="Custom output directory for models (default: <experiment-dir>/feature-models)"
+        "-o",
+        "--output-dir",
+        help="Custom output directory for models (default: <experiment-dir>/feature-models)",
     )
 
     # Classifier selection
     clf_group = parser.add_argument_group("Classifier Selection")
     clf_group.add_argument(
-        "-m", "--classifier-model",
-        help="Classifier model name (e.g., norm-EFCAMDAT-train_xgboost). Required unless using --batch-models-dir."
+        "-m",
+        "--classifier-model",
+        help="Classifier model name (e.g., norm-EFCAMDAT-train_xgboost). Required unless using --batch-models-dir.",
     )
 
     # Processing mode
@@ -1379,57 +1481,62 @@ def create_parser() -> argparse.ArgumentParser:
         "--preprocess-text",
         action="store_true",
         help="Use TF-IDF preprocessing pipeline with raw text (legacy mode). "
-             "Requires -t/--test-file with text CSV. "
-             "Default is to use pre-extracted features."
+        "Requires -t/--test-file with text CSV. "
+        "Default is to use pre-extracted features.",
     )
 
     # Input data selection (features mode - default)
-    input_group = parser.add_argument_group("Input Data Selection (Features Mode - Default)")
+    input_group = parser.add_argument_group(
+        "Input Data Selection (Features Mode - Default)"
+    )
 
     # Simple use case: single feature directory
     input_group.add_argument(
-        "-d", "--feature-dir",
+        "-d",
+        "--feature-dir",
         help="[Features mode] Path to TF-IDF feature directory (e.g., features/norm-CELVA-SP/). "
-             "Must contain features_dense.csv. Script will look for matching labels CSV."
+        "Must contain features_dense.csv. Script will look for matching labels CSV.",
     )
 
     # Advanced: explicit file paths
     input_group.add_argument(
-        "-f", "--features-file",
-        help="[Features mode] Path to pre-extracted features CSV file (flat features, one row per sample)"
+        "-f",
+        "--features-file",
+        help="[Features mode] Path to pre-extracted features CSV file (flat features, one row per sample)",
     )
     input_group.add_argument(
         "--labels-file",
-        help="[Features mode] Path to labels file (one label per line, matching features row order)"
+        help="[Features mode] Path to labels file (one label per line, matching features row order)",
     )
     input_group.add_argument(
         "--labels-csv",
-        help="[Features mode] Path to CSV file containing labels in a column (use with --cefr-column)"
+        help="[Features mode] Path to CSV file containing labels in a column (use with --cefr-column)",
     )
 
     # Batch processing: multiple feature directories
     input_group.add_argument(
         "--batch-features-dir",
-        help="[Features mode] Directory containing multiple feature subdirectories (for batch processing all)"
+        help="[Features mode] Directory containing multiple feature subdirectories (for batch processing all)",
     )
     input_group.add_argument(
         "--labels-csv-dir",
-        help="[Features mode] Directory containing label CSV files (for batch processing, default: ml-test-data)"
+        help="[Features mode] Directory containing label CSV files (for batch processing, default: ml-test-data)",
     )
 
     # Batch processing: multiple models with automatic feature matching
     input_group.add_argument(
         "--batch-models-dir",
         help="[Features mode] Directory containing multiple classifier models (e.g., models/classifiers/). "
-        "Requires --batch-features-dir. Script will extract config hash from model name and match to feature directories."
+        "Requires --batch-features-dir. Script will extract config hash from model name and match to feature directories.",
     )
 
     # Text mode input
     text_group = parser.add_argument_group("Text Mode Input (with --preprocess-text)")
     text_group.add_argument(
-        "-t", "--test-file",
+        "-t",
+        "--test-file",
         help="[Text mode] Test CSV file with raw text (use with --preprocess-text). "
-             "File must contain text and label columns."
+        "File must contain text and label columns.",
     )
 
     # Data configuration
@@ -1437,53 +1544,45 @@ def create_parser() -> argparse.ArgumentParser:
     data_group.add_argument(
         "--text-column",
         default="text",
-        help="[Text mode] Column name containing text (default: text)"
+        help="[Text mode] Column name containing text (default: text)",
     )
     data_group.add_argument(
         "--label-column",
         default="label",
-        help="[Text mode] Column name containing labels (default: label)"
+        help="[Text mode] Column name containing labels (default: label)",
     )
     data_group.add_argument(
         "--cefr-column",
         default="cefr_label",
-        help="[Features mode] Column name containing CEFR labels (default: cefr_label)"
+        help="[Features mode] Column name containing CEFR labels (default: cefr_label)",
     )
 
     # Output configuration
     output_group = parser.add_argument_group("Output Configuration")
     output_group.add_argument(
-        "--no-save-results",
-        action="store_true",
-        help="Skip saving prediction results"
+        "--no-save-results", action="store_true", help="Skip saving prediction results"
     )
     output_group.add_argument(
-        "--no-save-csv",
-        action="store_true",
-        help="Skip saving CSV outputs"
+        "--no-save-csv", action="store_true", help="Skip saving CSV outputs"
     )
     output_group.add_argument(
-        "--no-save-json",
-        action="store_true",
-        help="Skip saving JSON outputs"
+        "--no-save-json", action="store_true", help="Skip saving JSON outputs"
     )
     output_group.add_argument(
-        "-q", "--quiet",
-        action="store_true",
-        help="Suppress verbose output"
+        "-q", "--quiet", action="store_true", help="Suppress verbose output"
     )
 
     return parser
 
 
-def args_to_config(args: argparse.Namespace) -> GlobalConfig:
+def args_to_config(args: argparse.Namespace) -> GlobalConfig:  # noqa: C901
     """Convert argparse namespace to GlobalConfig."""
     # Check if config file or json string provided
     if args.config_file:
         config_path = Path(args.config_file)
-        if config_path.suffix in ['.yaml', '.yml']:
+        if config_path.suffix in [".yaml", ".yml"]:
             config = GlobalConfig.from_yaml_file(str(config_path))
-        elif config_path.suffix == '.json':
+        elif config_path.suffix == ".json":
             config = GlobalConfig.from_json_file(str(config_path))
         else:
             raise ValueError(f"Unsupported config file format: {config_path.suffix}")
@@ -1492,7 +1591,7 @@ def args_to_config(args: argparse.Namespace) -> GlobalConfig:
         if args.experiment_dir:
             config.experiment_config = ExperimentConfig(
                 experiment_dir=args.experiment_dir,
-                models_dir=args.output_dir if args.output_dir else None
+                models_dir=args.output_dir if args.output_dir else None,
             )
         elif args.output_dir:
             config.experiment_config.models_dir = args.output_dir
@@ -1526,30 +1625,28 @@ def args_to_config(args: argparse.Namespace) -> GlobalConfig:
         # Build config from CLI args
         experiment_config = ExperimentConfig(
             experiment_dir=args.experiment_dir or "data/experiments/zero-shot",
-            models_dir=args.output_dir if args.output_dir else None
+            models_dir=args.output_dir if args.output_dir else None,
         )
 
         data_config = DataConfig(
             text_column=args.text_column,
             label_column=args.label_column,
-            cefr_column=args.cefr_column
+            cefr_column=args.cefr_column,
         )
 
         output_config = OutputConfig(
             save_results=not args.no_save_results,
             save_csv=not args.no_save_csv,
             save_json=not args.no_save_json,
-            verbose=not args.quiet
+            verbose=not args.quiet,
         )
 
         return GlobalConfig(
-            experiment_config,
-            data_config=data_config,
-            output_config=output_config
+            experiment_config, data_config=data_config, output_config=output_config
         )
 
 
-def main():
+def main():  # noqa: C901
     """Main entry point for predictions."""
     parser = create_parser()
     args = parser.parse_args()
@@ -1566,14 +1663,14 @@ def main():
         print()
 
     # Validate experiment structure
-    required_dirs = ['ml-test-data', 'feature-models', 'features']
+    required_dirs = ["ml-test-data", "feature-models", "features"]
     if args.preprocess_text:
         # Text mode needs TF-IDF models
         pass  # feature-models already in required_dirs
     is_valid, errors = validate_experiment_structure(
         config.experiment_config.experiment_dir,
         required_dirs=required_dirs,
-        verbose=config.output_config.verbose
+        verbose=config.output_config.verbose,
     )
     if not is_valid:
         print("\n✗ Experiment structure validation failed!")
@@ -1602,7 +1699,7 @@ def main():
             predict_with_text_pipeline(
                 config,
                 classifier_model_name=args.classifier_model,
-                test_file=args.test_file
+                test_file=args.test_file,
             )
 
         else:
@@ -1627,12 +1724,14 @@ def main():
                 dataset_name = feature_dir_path.name
 
                 # Look for corresponding label CSV in ml-test-data
-                labels_csv_path = Path(config.experiment_config.ml_test_dir) / f"{dataset_name}.csv"
+                labels_csv_path = (
+                    Path(config.experiment_config.ml_test_dir) / f"{dataset_name}.csv"
+                )
 
                 if not labels_csv_path.exists():
                     if config.output_config.verbose:
                         print(f"⚠ Label CSV not found: {labels_csv_path}")
-                        print(f"  Making predictions without evaluation")
+                        print("  Making predictions without evaluation")
                     labels_csv_path = None
 
                 if config.output_config.verbose:
@@ -1645,7 +1744,7 @@ def main():
                     config,
                     classifier_model_name=args.classifier_model,
                     features_file=str(features_file),
-                    labels_csv=str(labels_csv_path) if labels_csv_path else None
+                    labels_csv=str(labels_csv_path) if labels_csv_path else None,
                 )
 
             elif args.features_file:
@@ -1655,7 +1754,7 @@ def main():
                     classifier_model_name=args.classifier_model,
                     features_file=args.features_file,
                     labels_file=args.labels_file,
-                    labels_csv=args.labels_csv
+                    labels_csv=args.labels_csv,
                 )
 
             elif args.batch_models_dir:
@@ -1667,7 +1766,7 @@ def main():
                     config,
                     models_dir=args.batch_models_dir,
                     features_dir=args.batch_features_dir,
-                    labels_csv_dir=args.labels_csv_dir
+                    labels_csv_dir=args.labels_csv_dir,
                 )
 
             elif args.batch_features_dir:
@@ -1676,11 +1775,13 @@ def main():
                     config,
                     classifier_model_name=args.classifier_model,
                     features_dir=args.batch_features_dir,
-                    labels_csv_dir=args.labels_csv_dir
+                    labels_csv_dir=args.labels_csv_dir,
                 )
 
             else:
-                parser.error("Must provide either -d/--feature-dir, -f/--features-file, --batch-features-dir, or --batch-models-dir (or use --preprocess-text with -t/--test-file)")
+                parser.error(
+                    "Must provide either -d/--feature-dir, -f/--features-file, --batch-features-dir, or --batch-models-dir (or use --preprocess-text with -t/--test-file)"
+                )
 
     except Exception as e:
         print(f"Error during prediction: {e}")
