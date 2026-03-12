@@ -21,7 +21,7 @@ Extracts aggregate perplexity features from pre-trained GPT-2, trains Logistic R
 
 ## Data Acquisition
 
-**Option A - Google Drive:** Upload your CSVs to `MyDrive/cefr-data/splits/` before running.
+**Option A - Google Drive:** Upload your CSVs to `MyDrive/phd-experimental-data/data/splits/` before running.
 
 **Option B - wget:** Paste a direct download URL to a .zip containing the CSVs.
 

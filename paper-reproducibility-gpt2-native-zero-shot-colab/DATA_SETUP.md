@@ -26,10 +26,13 @@ Other columns (`writing_id`, `l1`) are preserved but not used by the pipeline.
 
 ## Option A: Google Drive
 
-1. Create a folder in Google Drive: `MyDrive/cefr-data/splits/`
-2. Upload all 4 CSV files into that folder
-3. In the notebook, the default path is `/content/drive/MyDrive/cefr-data/splits`
-4. Change the `DATA_PATH` variable if you use a different location
+1. Ensure folder exists in Google Drive: `MyDrive/phd-experimental-data/data/splits/`
+2. Sync your rclone data there using:
+   ```bash
+   rclone sync i:/phd-experimental-data/data/splits/ gdrive:phd-experimental-data/data/splits/
+   ```
+3. In the notebook, the default path is `/content/drive/MyDrive/phd-experimental-data/data/splits`
+4. Change the `DATA_PATH` variable in the notebook if you use a different location
 
 ## Option B: Download via URL
 
