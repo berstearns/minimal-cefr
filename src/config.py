@@ -296,7 +296,11 @@ class GlobalConfig:
     def from_dict(cls, config_dict: Dict[str, Any]) -> "GlobalConfig":
         """Create config from dictionary."""
         experiment_config = ExperimentConfig(**config_dict.get("experiment_config", {}))
-        tfidf_config = TfidfConfig(**config_dict.get("tfidf_config", {}))
+        tfidf_dict = config_dict.get("tfidf_config", {})
+        # Convert ngram_range list to tuple if needed
+        if "ngram_range" in tfidf_dict and isinstance(tfidf_dict["ngram_range"], list):
+            tfidf_dict["ngram_range"] = tuple(tfidf_dict["ngram_range"])
+        tfidf_config = TfidfConfig(**tfidf_dict)
         classifier_config = ClassifierConfig(**config_dict.get("classifier_config", {}))
         data_config = DataConfig(**config_dict.get("data_config", {}))
         output_config = OutputConfig(**config_dict.get("output_config", {}))

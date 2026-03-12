@@ -4,6 +4,9 @@ import os
 from pathlib import Path
 import argparse
 
+# Global verbose flag
+VERBOSE = False
+
 def parse_prompts_outputs(prompt_output):
     '''
     Given a prompt output that contains a JSON-like structure (e.g. '{"score":"A1", "level":"B2"}'),
@@ -174,6 +177,7 @@ def process_prompt_files(input_folder, output_folder, use_one_hot=True):
     Returns:
     dict: Statistics dictionary with counts of successful and failed parses
     '''
+    global VERBOSE
     # Create output folder if it doesn't exist
     output_path = Path(output_folder)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -196,9 +200,10 @@ def process_prompt_files(input_folder, output_folder, use_one_hot=True):
     txt_files = list(input_path.glob('*.txt'))
     stats['total_files'] = len(txt_files)
 
-    print(f"Found {stats['total_files']} .txt files to process")
-    print(f"Processing files from: {input_folder}")
-    print(f"Saving results to: {output_folder}\n")
+    if VERBOSE:
+        print(f"Found {stats['total_files']} .txt files to process")
+        print(f"Processing files from: {input_folder}")
+        print(f"Saving results to: {output_folder}\n")
 
     # Process each file
     for txt_file in txt_files:
@@ -219,7 +224,8 @@ def process_prompt_files(input_folder, output_folder, use_one_hot=True):
                     else:
                         # If conversion fails, keep original format
                         final_result = parsed_result
-                        print(f"⚠ Warning: Could not convert {txt_file.name} to one-hot format, saving original")
+                        if VERBOSE:
+                            print(f"⚠ Warning: Could not convert {txt_file.name} to one-hot format, saving original")
                 else:
                     final_result = parsed_result
 
@@ -230,26 +236,31 @@ def process_prompt_files(input_folder, output_folder, use_one_hot=True):
                     json.dump(final_result, f, indent=2, ensure_ascii=False)
 
                 stats['successful'] += 1
-                print(f"✓ Processed: {txt_file.name} -> {output_file.name}")
+                if VERBOSE:
+                    print(f"✓ Processed: {txt_file.name} -> {output_file.name}")
             else:
                 stats['failed'] += 1
                 stats['failed_files'].append(txt_file.name)
-                print(f"✗ Failed to parse: {txt_file.name}")
+                if VERBOSE:
+                    print(f"✗ Failed to parse: {txt_file.name}")
 
         except Exception as e:
             stats['failed'] += 1
             stats['failed_files'].append(txt_file.name)
-            print(f"✗ Error processing {txt_file.name}: {str(e)}")
+            if VERBOSE:
+                print(f"✗ Error processing {txt_file.name}: {str(e)}")
 
-    # Print summary statistics
-    print("\n" + "="*60)
+    # Print summary statistics (always shown, even when not verbose)
+    if not VERBOSE:
+        print("")  # Add newline only in non-verbose mode
+    print("="*60)
     print("PROCESSING SUMMARY")
     print("="*60)
     print(f"Total files processed: {stats['total_files']}")
     print(f"Successfully parsed:   {stats['successful']} ({stats['successful']/stats['total_files']*100:.1f}%)" if stats['total_files'] > 0 else "Successfully parsed:   0")
     print(f"Failed to parse:       {stats['failed']} ({stats['failed']/stats['total_files']*100:.1f}%)" if stats['total_files'] > 0 else "Failed to parse:       0")
 
-    if stats['failed_files']:
+    if VERBOSE and stats['failed_files']:
         print(f"\nFailed files:")
         for failed_file in stats['failed_files']:
             print(f"  - {failed_file}")
@@ -279,10 +290,15 @@ Examples:
                         help='Output folder for parsed JSON files')
     parser.add_argument('--raw-labels', action='store_true',
                         help='Save raw label format instead of one-hot probability format (default: False)')
+    parser.add_argument('--verbose', '-v', action='store_true',
+                        help='Enable verbose output (default: False)')
     parser.add_argument('--test', action='store_true',
                         help='Run unit tests on parse_prompts_outputs function')
 
     args = parser.parse_args()
+
+    # Set global verbose flag
+    VERBOSE = args.verbose
 
     # Run tests if --test flag is provided
     if args.test:

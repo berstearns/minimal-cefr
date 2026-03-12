@@ -56,6 +56,7 @@ class ModelMetrics:
     adjacent_accuracy: Optional[float] = None
     macro_f1: Optional[float] = None
     weighted_f1: Optional[float] = None
+    micro_f1: Optional[float] = None
 
     # Model configuration
     tfidf_hash: Optional[str] = None
@@ -66,6 +67,9 @@ class ModelMetrics:
     # Additional info
     n_samples: Optional[int] = None
     classes_in_test: Optional[List[str]] = field(default_factory=list)
+
+    # For avg_micro_f1: store per-dataset breakdown
+    per_dataset_scores: Optional[Dict[str, float]] = None
 
 
 def parse_evaluation_report(
@@ -139,6 +143,12 @@ def parse_evaluation_report(
                 )  # 3rd group is f1-score
 
         results[strategy_name] = metrics
+
+    # Micro-F1 equals accuracy in multi-class classification
+    # Set micro_f1 = accuracy for both strategies
+    for strategy_name in ["argmax", "rounded_avg"]:
+        if strategy_name in results and "accuracy" in results[strategy_name]:
+            results[strategy_name]["micro_f1"] = results[strategy_name]["accuracy"]
 
     # Extract dataset info (from header)
     samples_pattern = r"\*\*Samples\*\*:\s+(\d+)"
@@ -303,16 +313,19 @@ def compute_metrics_from_predictions(
     if len(labels_in_data) > 1:
         macro_f1 = f1_score(y_true, y_pred, labels=labels_in_data, average="macro", zero_division=0)
         weighted_f1 = f1_score(y_true, y_pred, labels=labels_in_data, average="weighted", zero_division=0)
+        micro_f1 = f1_score(y_true, y_pred, labels=labels_in_data, average="micro", zero_division=0)
     else:
         # Not enough classes for meaningful F1
         macro_f1 = 0.0
         weighted_f1 = 0.0
+        micro_f1 = 0.0
 
     return {
         "accuracy": accuracy,
         "adjacent_accuracy": adjacent_accuracy,
         "macro_f1": macro_f1,
         "weighted_f1": weighted_f1,
+        "micro_f1": micro_f1,
         "n_samples": len(y_true),
         "classes_in_test": labels_in_data,
     }
@@ -497,6 +510,7 @@ def collect_metrics_from_manual_predictions(
                         adjacent_accuracy=metrics.get("adjacent_accuracy"),
                         macro_f1=metrics.get("macro_f1"),
                         weighted_f1=metrics.get("weighted_f1"),
+                        micro_f1=metrics.get("micro_f1"),
                         n_samples=metrics.get("n_samples"),
                         classes_in_test=metrics.get("classes_in_test", []),
                         tfidf_hash=model_config.get("tfidf_hash"),
@@ -611,6 +625,7 @@ def collect_all_metrics(
                     adjacent_accuracy=metrics.get("adjacent_accuracy"),
                     macro_f1=metrics.get("macro_f1"),
                     weighted_f1=metrics.get("weighted_f1"),
+                    micro_f1=metrics.get("micro_f1"),
                     n_samples=metrics.get("n_samples"),
                     classes_in_test=metrics.get("classes_in_test", []),
                     tfidf_hash=model_config.get("tfidf_hash"),
@@ -634,15 +649,17 @@ def rank_models(
     criterion: str = "accuracy",
     dataset_filter: Optional[str] = None,
     strategy_filter: Optional[str] = None,
+    exclude_datasets: Optional[List[str]] = None,
 ) -> List[ModelMetrics]:
     """
     Rank models according to a criterion.
 
     Args:
         metrics_list: List of ModelMetrics
-        criterion: Ranking criterion ("accuracy", "adjacent_accuracy", "macro_f1", "weighted_f1")
+        criterion: Ranking criterion ("accuracy", "adjacent_accuracy", "macro_f1", "weighted_f1", "micro_f1", "avg_micro_f1")
         dataset_filter: Only include specific dataset (e.g., "norm-CELVA-SP")
         strategy_filter: Only include specific strategy ("argmax" or "rounded_avg")
+        exclude_datasets: List of dataset names to exclude from ranking
 
     Returns:
         Sorted list of ModelMetrics (best first)
@@ -653,10 +670,67 @@ def rank_models(
     if dataset_filter:
         filtered = [m for m in filtered if m.dataset_name == dataset_filter]
 
+    # Exclude specific datasets
+    if exclude_datasets:
+        filtered = [m for m in filtered if m.dataset_name not in exclude_datasets]
+
     if strategy_filter:
         filtered = [m for m in filtered if m.strategy == strategy_filter]
 
-    # Get criterion value
+    # Special handling for avg_micro_f1: compute average across datasets per model
+    if criterion == "avg_micro_f1":
+        # Group by model_name and strategy
+        model_groups = {}
+        for m in filtered:
+            key = (m.model_name, m.strategy)
+            if key not in model_groups:
+                model_groups[key] = []
+            model_groups[key].append(m)
+
+        # Compute average micro_f1 for each model
+        averaged_metrics = []
+        for (model_name, strategy), metrics in model_groups.items():
+            micro_f1_scores = [m.micro_f1 for m in metrics if m.micro_f1 is not None]
+
+            if micro_f1_scores:
+                avg_micro_f1 = sum(micro_f1_scores) / len(micro_f1_scores)
+
+                # Build per-dataset scores dictionary
+                per_dataset_scores = {}
+                for m in metrics:
+                    if m.micro_f1 is not None:
+                        per_dataset_scores[m.dataset_name] = m.micro_f1
+
+                # Create a representative ModelMetrics with averaged score
+                # Use first metric as template
+                representative = metrics[0]
+                averaged_metric = ModelMetrics(
+                    model_name=model_name,
+                    dataset_name=f"avg_across_{len(metrics)}_datasets",
+                    strategy=strategy,
+                    accuracy=None,
+                    adjacent_accuracy=None,
+                    macro_f1=None,
+                    weighted_f1=None,
+                    micro_f1=avg_micro_f1,  # Store average in micro_f1 field
+                    n_samples=sum(m.n_samples for m in metrics if m.n_samples),
+                    tfidf_hash=representative.tfidf_hash,
+                    tfidf_max_features=representative.tfidf_max_features,
+                    tfidf_readable_name=representative.tfidf_readable_name,
+                    classifier_type=representative.classifier_type,
+                    per_dataset_scores=per_dataset_scores,  # Store per-dataset breakdown
+                )
+                averaged_metrics.append(averaged_metric)
+
+        # Sort by averaged micro_f1
+        sorted_metrics = sorted(
+            averaged_metrics,
+            key=lambda m: m.micro_f1 if m.micro_f1 is not None else -1.0,
+            reverse=True
+        )
+        return sorted_metrics
+
+    # Standard criterion handling
     def get_criterion_value(m: ModelMetrics) -> float:
         value = getattr(m, criterion, None)
         return value if value is not None else -1.0
@@ -681,6 +755,11 @@ def print_ranking_table(
     if top_n:
         ranked_metrics = ranked_metrics[:top_n]
 
+    # Special handling for avg_micro_f1 with per-dataset columns
+    if criterion == "avg_micro_f1" and ranked_metrics and ranked_metrics[0].per_dataset_scores:
+        print_avg_micro_f1_table(ranked_metrics, top_n, show_config)
+        return
+
     print(f"\n{'='*120}")
     print(f"RANKING BY: {criterion.upper().replace('_', ' ')}")
     print(f"{'='*120}")
@@ -699,7 +778,11 @@ def print_ranking_table(
 
     # Rows
     for i, m in enumerate(ranked_metrics, 1):
-        value = getattr(m, criterion, None)
+        # For avg_micro_f1, the value is stored in micro_f1 field
+        if criterion == "avg_micro_f1":
+            value = m.micro_f1
+        else:
+            value = getattr(m, criterion, None)
         value_str = f"{value:.4f}" if value is not None else "N/A"
 
         # Truncate model name if too long
@@ -725,12 +808,104 @@ def print_ranking_table(
     print(f"{'='*120}\n")
 
 
+def print_avg_micro_f1_table(
+    ranked_metrics: List[ModelMetrics],
+    top_n: Optional[int] = None,
+    show_config: bool = True,
+):
+    """Print avg_micro_f1 ranking with per-dataset breakdown columns."""
+    if not ranked_metrics:
+        print("No results to display.")
+        return
+
+    # Get all unique datasets (sorted for consistent column order)
+    all_datasets = set()
+    for m in ranked_metrics:
+        if m.per_dataset_scores:
+            all_datasets.update(m.per_dataset_scores.keys())
+    dataset_columns = sorted(all_datasets)
+
+    print(f"\n{'='*200}")
+    print(f"RANKING BY: AVG MICRO-F1 (with per-dataset breakdown)")
+    print(f"{'='*200}")
+
+    # Build header
+    header_parts = [
+        f"{'Rank':<6}",
+        f"{'Model':<40}",
+        f"{'Strategy':<10}",
+        f"{'Overall':<10}",
+    ]
+
+    # Add dataset columns (abbreviated names)
+    for ds in dataset_columns:
+        # Abbreviate dataset name for column header
+        ds_abbrev = ds[:12] if len(ds) <= 12 else ds[:11] + "."
+        header_parts.append(f"{ds_abbrev:<12}")
+
+    if show_config:
+        header_parts.append(f"{'TF-IDF':<18}")
+        header_parts.append(f"{'Classifier':<12}")
+
+    print(" ".join(header_parts))
+
+    # Build separator
+    sep_parts = [
+        f"{'-'*6}",
+        f"{'-'*40}",
+        f"{'-'*10}",
+        f"{'-'*10}",
+    ]
+    for _ in dataset_columns:
+        sep_parts.append(f"{'-'*12}")
+    if show_config:
+        sep_parts.append(f"{'-'*18}")
+        sep_parts.append(f"{'-'*12}")
+
+    print(" ".join(sep_parts))
+
+    # Print rows
+    for i, m in enumerate(ranked_metrics, 1):
+        overall_str = f"{m.micro_f1:.4f}" if m.micro_f1 is not None else "N/A"
+
+        # Truncate model name if too long
+        model_display = m.model_name[:38] + ".." if len(m.model_name) > 40 else m.model_name
+
+        row_parts = [
+            f"{i:<6}",
+            f"{model_display:<40}",
+            f"{m.strategy:<10}",
+            f"{overall_str:<10}",
+        ]
+
+        # Add per-dataset scores
+        for ds in dataset_columns:
+            score = m.per_dataset_scores.get(ds) if m.per_dataset_scores else None
+            score_str = f"{score:.4f}" if score is not None else "N/A"
+            row_parts.append(f"{score_str:<12}")
+
+        if show_config:
+            tfidf_display = (
+                m.tfidf_readable_name or f"hash:{m.tfidf_hash[:8]}"
+                if m.tfidf_hash
+                else "N/A"
+            )
+            clf_display = m.classifier_type or "N/A"
+            row_parts.append(f"{tfidf_display:<18}")
+            row_parts.append(f"{clf_display:<12}")
+
+        print(" ".join(row_parts))
+
+    print(f"{'='*200}\n")
+
+
 def print_ranking_grouped_by_dataset(
     metrics_list: List[ModelMetrics],
     criterion: str,
     strategy_filter: Optional[str] = None,
     top_n: Optional[int] = None,
     show_config: bool = True,
+    exclude_datasets: Optional[List[str]] = None,
 ):
     """Print ranked models grouped by dataset."""
     if not metrics_list:
@@ -740,6 +915,9 @@ def print_ranking_grouped_by_dataset(
     # Group metrics by dataset
     datasets = {}
     for m in metrics_list:
+        # Skip excluded datasets
+        if exclude_datasets and m.dataset_name in exclude_datasets:
+            continue
         if m.dataset_name not in datasets:
             datasets[m.dataset_name] = []
         datasets[m.dataset_name].append(m)
@@ -782,7 +960,11 @@ def print_ranking_grouped_by_dataset(
 
         # Rows
         for i, m in enumerate(ranked, 1):
-            value = getattr(m, criterion, None)
+            # For avg_micro_f1, the value is stored in micro_f1 field
+            if criterion == "avg_micro_f1":
+                value = m.micro_f1
+            else:
+                value = getattr(m, criterion, None)
             value_str = f"{value:.4f}" if value is not None else "N/A"
 
             # Truncate model name if too long
@@ -843,6 +1025,7 @@ def generate_summary_report(  # noqa: C901
         ("adjacent_accuracy", "Adjacent Accuracy"),
         ("macro_f1", "Macro F1-Score"),
         ("weighted_f1", "Weighted F1-Score"),
+        ("micro_f1", "Micro F1-Score"),
     ]
 
     for criterion, criterion_name in criteria:
@@ -1046,8 +1229,8 @@ Examples:
 
     parser.add_argument(
         "--rank",
-        choices=["accuracy", "adjacent_accuracy", "macro_f1", "weighted_f1"],
-        help="Rank models by criterion",
+        choices=["accuracy", "adjacent_accuracy", "macro_f1", "weighted_f1", "micro_f1", "avg_micro_f1"],
+        help="Rank models by criterion (avg_micro_f1 ranks by average micro-f1 across all datasets)",
     )
 
     parser.add_argument(
@@ -1058,6 +1241,19 @@ Examples:
         "--strategy",
         choices=["argmax", "rounded_avg"],
         help="Filter by prediction strategy",
+    )
+
+    parser.add_argument(
+        "--exclude-datasets",
+        nargs="*",
+        help="Exclude specific datasets from ranking (e.g., norm-EFCAMDAT-train). "
+             "By default, datasets containing 'EFCAMDAT-train' or 'efcamdat-train' are excluded.",
+    )
+
+    parser.add_argument(
+        "--include-all-datasets",
+        action="store_true",
+        help="Include all datasets (override default exclusion of EFCAMDAT-train)",
     )
 
     parser.add_argument("--top", type=int, help="Show only top N results")
@@ -1107,6 +1303,25 @@ Examples:
         print("No metrics found.")
         sys.exit(0)
 
+    # Determine which datasets to exclude
+    exclude_datasets = []
+    if args.include_all_datasets:
+        # User wants all datasets - no exclusions
+        exclude_datasets = []
+    elif args.exclude_datasets is not None:
+        # User explicitly specified datasets to exclude
+        exclude_datasets = args.exclude_datasets
+    else:
+        # Default: exclude datasets containing 'EFCAMDAT-train' or 'efcamdat-train'
+        all_dataset_names = set(m.dataset_name for m in metrics_list)
+        exclude_datasets = [
+            ds for ds in all_dataset_names
+            if 'efcamdat-train' in ds.lower()
+        ]
+        if exclude_datasets and args.verbose:
+            print(f"Excluding datasets by default: {', '.join(exclude_datasets)}")
+            print("Use --include-all-datasets to include them, or --exclude-datasets to specify custom exclusions.\n")
+
     # Generate summary report
     if args.summary_report:
         output_path = Path(args.summary_report)
@@ -1114,8 +1329,9 @@ Examples:
 
     # Rank models
     if args.rank:
-        # Use grouped display by default, unless --dataset filter is used or --no-group is specified
-        use_grouped = not args.dataset and not args.no_group
+        # avg_micro_f1 always uses flat ranking (overall ranking across datasets)
+        # Otherwise use grouped display by default, unless --dataset filter is used or --no-group is specified
+        use_grouped = not args.dataset and not args.no_group and args.rank != "avg_micro_f1"
 
         if use_grouped:
             # Group by dataset (default behavior)
@@ -1125,14 +1341,16 @@ Examples:
                 strategy_filter=args.strategy,
                 top_n=args.top,
                 show_config=not args.no_config,
+                exclude_datasets=exclude_datasets,
             )
         else:
-            # Flat ranking (when filtering by specific dataset or --no-group)
+            # Flat ranking (when filtering by specific dataset, --no-group, or avg_micro_f1)
             ranked = rank_models(
                 metrics_list,
                 criterion=args.rank,
                 dataset_filter=args.dataset,
                 strategy_filter=args.strategy,
+                exclude_datasets=exclude_datasets,
             )
 
             print_ranking_table(
