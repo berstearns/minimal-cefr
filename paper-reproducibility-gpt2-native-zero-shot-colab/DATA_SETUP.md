@@ -26,13 +26,15 @@ Other columns (`writing_id`, `l1`) are preserved but not used by the pipeline.
 
 ## Option A: Google Drive
 
-1. Ensure folder exists in Google Drive: `MyDrive/phd-experimental-data/data/splits/`
-2. Sync your rclone data there using:
+1. Sync your data from i: to Google Drive:
    ```bash
-   rclone sync i:/phd-experimental-data/data/splits/ gdrive:phd-experimental-data/data/splits/
+   rclone sync i:/phd-experimental-data/cefr-classification/data/splits/ gdrive:phd-experimental-data/cefr-classification/data/splits/
    ```
-3. In the notebook, the default path is `/content/drive/MyDrive/phd-experimental-data/data/splits`
-4. Change the `DATA_PATH` variable in the notebook if you use a different location
+2. In Colab, the notebook will use:
+   ```python
+   DATA_PATH = /content/drive/MyDrive/phd-experimental-data/cefr-classification/data/splits
+   ```
+3. The notebook is synced from: `i:/_p/cefr-classification/notebooks/gpt2-native-zero-shot-colab/`
 
 ## Option B: Download via URL
 
