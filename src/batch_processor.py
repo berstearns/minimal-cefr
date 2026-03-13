@@ -75,13 +75,20 @@ class BatchProcessor:
                 metadata["short_texts"] = {}
             metadata["short_texts"]["last_completed_batch"] = batch_idx
             metadata["short_texts"]["num_completed_batches"] = batch_idx + 1
+            completed = batch_idx + 1
+            total = metadata["short_texts"].get("total_batches", "?")
         else:
             if "long_texts" not in metadata:
                 metadata["long_texts"] = {}
             metadata["long_texts"]["last_completed_batch"] = batch_idx
             metadata["long_texts"]["num_completed_batches"] = batch_idx + 1
+            completed = batch_idx + 1
+            total = metadata["long_texts"].get("total_batches", "?")
 
         self._save_metadata(metadata)
+
+        # Log batch save
+        print(f"  [CHECKPOINT] {batch_type.upper():5s} batch {batch_idx:6d} saved: {len(results):3d} results → {batch_file.name} ({completed}/{total})")
 
     def _load_metadata(self) -> Dict[str, Any]:
         """Load metadata from file."""
