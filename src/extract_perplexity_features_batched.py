@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Batched perplexity extraction with checkpointing and resume support.
+Batched perplexity extraction with long-text strategy support and checkpointing.
 
-Key improvements over standard extraction:
-- Variable-length batching (texts grouped by length)
+Key features:
+- Separates texts into SHORT (<max_length) and LONG (>=max_length)
+- Batches short texts together (batch_size=16) for efficiency
+- Processes long texts individually with immediate_context strategy
 - Checkpoint saving after each batch
 - Resume from last completed batch
 - Final merge of all batches into single output
@@ -14,9 +16,9 @@ Usage:
         --text-column text \\
         -m gpt2 \\
         -d cuda \\
-        --aggregate-only \\
         --batch-size 16 \\
         --checkpoint-dir ./checkpoints/ \\
+        --long-text-strategy immediate_context \\
         -f csv \\
         -o output.csv
 """
@@ -67,14 +69,17 @@ def extract_batch(
         text = texts.iloc[idx]
         if text.strip():
             result = model.compute_token_perplexities(text, top_k, context_window)
-            results.append(result.to_dict())
+            result_dict = result.to_dict()
+            # Add original row index for traceability
+            result_dict["original_row_idx"] = idx
+            results.append(result_dict)
 
     return results
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Batched perplexity extraction with checkpointing",
+        description="Batched perplexity extraction with long-text strategy support",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
@@ -104,13 +109,32 @@ def main():
         "--batch-size",
         type=int,
         default=16,
-        help="Batch size (default: 16, reduce for low VRAM)",
+        help="Batch size for short texts (default: 16, reduce for low VRAM)",
     )
     parser.add_argument(
         "--checkpoint-dir",
         type=str,
         default="./checkpoints",
         help="Directory for batch checkpoints (default: ./checkpoints)",
+    )
+
+    # Long-text strategy
+    parser.add_argument(
+        "--long-text-strategy",
+        type=str,
+        choices=["immediate_context", "sliding_window", "truncate"],
+        default="immediate_context",
+        help="Strategy for texts exceeding max_tokens (default: immediate_context)",
+    )
+    parser.add_argument(
+        "--skip-short-texts",
+        action="store_true",
+        help="Skip processing short texts (useful for resume)",
+    )
+    parser.add_argument(
+        "--skip-long-texts",
+        action="store_true",
+        help="Skip processing long texts (fast mode)",
     )
 
     # Features
@@ -158,58 +182,101 @@ def main():
         model_type="huggingface",
         model_name_or_path=args.model,
         device=args.device,
+        long_text_strategy=args.long_text_strategy,
     )
 
     print(f"Creating batches from {args.input}...")
-    batches = batch_processor.create_batches(
+    short_batches, long_batches, short_manifest, long_manifest = batch_processor.create_batches(
         args.input,
         text_column=args.text_column,
         limit=args.limit,
     )
 
-    print(f"Total batches: {len(batches)}")
+    # Process short texts
+    if not args.skip_short_texts:
+        print(f"\nProcessing {len(short_batches)} short text batches...")
+        start_batch = 0
+        if args.resume:
+            last_completed = batch_processor.get_last_completed_batch("short")
+            if last_completed is not None:
+                start_batch = last_completed + 1
+                print(f"Resuming short texts from batch {start_batch}")
 
-    # Determine start batch
-    start_batch = 0
-    if args.resume:
-        last_completed = batch_processor.get_last_completed_batch()
-        if last_completed is not None:
-            start_batch = last_completed + 1
-            print(f"Resuming from batch {start_batch}")
+        for batch_idx in range(start_batch, len(short_batches)):
+            batch_indices = short_batches[batch_idx]
+            print(f"\nShort batch {batch_idx + 1}/{len(short_batches)} ({len(batch_indices)} texts)")
 
-    # Process batches
-    for batch_idx in range(start_batch, len(batches)):
-        batch_indices = batches[batch_idx]
-        print(f"\nBatch {batch_idx + 1}/{len(batches)} ({len(batch_indices)} texts)")
+            results = extract_batch(
+                args.input,
+                batch_indices,
+                args.text_column,
+                model,
+                top_k=args.top_k,
+                context_window=args.context_window,
+            )
 
-        results = extract_batch(
-            args.input,
-            batch_indices,
-            args.text_column,
-            model,
-            top_k=args.top_k,
-            context_window=args.context_window,
-        )
+            # Filter for aggregate-only if requested
+            if args.aggregate_only:
+                results = [
+                    {
+                        "text": r["text"],
+                        "model": r["model"],
+                        "original_row_idx": r.get("original_row_idx"),
+                        **r["aggregate"],
+                    }
+                    for r in results
+                ]
 
-        # Filter for aggregate-only if requested
-        if args.aggregate_only:
-            results = [
-                {
-                    "text": r["text"],
-                    "model": r["model"],
-                    **r["aggregate"]
-                }
-                for r in results
-            ]
+            batch_processor.save_batch(batch_idx, results, batch_type="short")
+            print(f"  Saved {len(results)} results")
+    else:
+        print("Skipping short texts")
 
-        batch_processor.save_batch(batch_idx, results)
-        print(f"  Saved {len(results)} results")
+    # Process long texts
+    if not args.skip_long_texts:
+        print(f"\nProcessing {len(long_batches)} long text batches...")
+        start_batch = 0
+        if args.resume:
+            last_completed = batch_processor.get_last_completed_batch("long")
+            if last_completed is not None:
+                start_batch = last_completed + 1
+                print(f"Resuming long texts from batch {start_batch}")
+
+        for batch_idx in range(start_batch, len(long_batches)):
+            batch_indices = long_batches[batch_idx]
+            print(f"\nLong batch {batch_idx + 1}/{len(long_batches)} ({len(batch_indices)} texts)")
+
+            results = extract_batch(
+                args.input,
+                batch_indices,
+                args.text_column,
+                model,
+                top_k=args.top_k,
+                context_window=args.context_window,
+            )
+
+            # Filter for aggregate-only if requested
+            if args.aggregate_only:
+                results = [
+                    {
+                        "text": r["text"],
+                        "model": r["model"],
+                        "original_row_idx": r.get("original_row_idx"),
+                        **r["aggregate"],
+                    }
+                    for r in results
+                ]
+
+            batch_processor.save_batch(batch_idx, results, batch_type="long")
+            print(f"  Saved {len(results)} results")
+    else:
+        print("Skipping long texts")
 
     # Merge batches
     if not args.no_merge:
-        print(f"\nMerging {len(batches)} batches...")
+        print(f"\nMerging batches...")
         total = batch_processor.merge_batches(args.output)
-        print(f"Merged {total} results -> {args.output}")
+        print(f"✓ Merged {total} results -> {args.output}")
 
         # Convert format if needed
         if args.save_format != "json":
@@ -217,16 +284,19 @@ def main():
             df = pd.read_json(args.output)
 
             if args.save_format == "csv":
-                df.to_csv(args.output.replace(".json", ".csv"), index=False)
-                print(f"Saved as CSV: {args.output.replace('.json', '.csv')}")
+                csv_path = args.output.replace(".json", ".csv")
+                df.to_csv(csv_path, index=False)
+                print(f"Saved as CSV: {csv_path}")
             elif args.save_format == "jsonl":
-                with open(args.output.replace(".json", ".jsonl"), "w") as f:
+                jsonl_path = args.output.replace(".json", ".jsonl")
+                with open(jsonl_path, "w") as f:
                     for _, row in df.iterrows():
                         f.write(json.dumps(row.to_dict()) + "\n")
-                print(f"Saved as JSONL: {args.output.replace('.json', '.jsonl')}")
+                print(f"Saved as JSONL: {jsonl_path}")
     else:
         print("Skipping merge (--no-merge flag set)")
-        print(f"Batch files saved in: {batch_processor.batches_dir}")
+        print(f"Short batch files: {batch_processor.short_batches_dir}")
+        print(f"Long batch files: {batch_processor.long_batches_dir}")
 
     print("\nDone!")
 

@@ -2,6 +2,9 @@
 """
 Merge batch JSON files from batched extraction into single output file.
 
+Supports merging both short_batches/ and long_batches/ directories
+and restoring original CSV order via original_row_idx.
+
 Usage:
     python scripts/merge_batch_outputs.py \\
         --checkpoint-dir ./checkpoints/ \\
@@ -16,35 +19,69 @@ import pandas as pd
 from tqdm import tqdm
 
 
-def merge_batches(checkpoint_dir: str, output_file: str, output_format: str = "csv"):
+def merge_batches(
+    checkpoint_dir: str,
+    output_file: str,
+    output_format: str = "csv",
+    short_batches_dir: str = None,
+    long_batches_dir: str = None,
+):
     """
-    Merge all batch files into single output.
+    Merge all batch files (short and long) into single output.
 
     Args:
         checkpoint_dir: Directory containing batch checkpoints
         output_file: Output file path
         output_format: Output format (csv, json, jsonl)
+        short_batches_dir: Path to short_batches directory (default: checkpoint_dir/short_batches)
+        long_batches_dir: Path to long_batches directory (default: checkpoint_dir/long_batches)
     """
     checkpoint_dir = Path(checkpoint_dir)
-    batches_dir = checkpoint_dir / "batches"
 
-    if not batches_dir.exists():
-        raise FileNotFoundError(f"Batches directory not found: {batches_dir}")
+    # Determine batch directories
+    if short_batches_dir is None:
+        short_batches_dir = checkpoint_dir / "short_batches"
+    else:
+        short_batches_dir = Path(short_batches_dir)
 
-    batch_files = sorted(batches_dir.glob("batch_*.json"))
-    if not batch_files:
-        raise FileNotFoundError(f"No batch files found in {batches_dir}")
+    if long_batches_dir is None:
+        long_batches_dir = checkpoint_dir / "long_batches"
+    else:
+        long_batches_dir = Path(long_batches_dir)
 
-    print(f"Found {len(batch_files)} batch files")
-
-    # Merge all results
     all_results = []
-    for batch_file in tqdm(batch_files, desc="Merging batches"):
-        with open(batch_file, 'r') as f:
-            results = json.load(f)
-        all_results.extend(results)
+
+    # Merge short batches
+    short_batch_files = sorted(short_batches_dir.glob("batch_*.json")) if short_batches_dir.exists() else []
+    if short_batch_files:
+        print(f"Found {len(short_batch_files)} short batch files")
+        for batch_file in tqdm(short_batch_files, desc="Merging short batches"):
+            with open(batch_file, 'r') as f:
+                results = json.load(f)
+            all_results.extend(results)
+        print(f"  ✓ Merged {len(short_batch_files)} short batches")
+
+    # Merge long batches
+    long_batch_files = sorted(long_batches_dir.glob("batch_*.json")) if long_batches_dir.exists() else []
+    if long_batch_files:
+        print(f"Found {len(long_batch_files)} long batch files")
+        for batch_file in tqdm(long_batch_files, desc="Merging long batches"):
+            with open(batch_file, 'r') as f:
+                results = json.load(f)
+            all_results.extend(results)
+        print(f"  ✓ Merged {len(long_batch_files)} long batches")
+
+    if not all_results:
+        raise FileNotFoundError(
+            f"No batch files found in {short_batches_dir} or {long_batches_dir}"
+        )
 
     print(f"Total results: {len(all_results)}")
+
+    # Sort by original_row_idx to restore original order
+    if all_results and "original_row_idx" in all_results[0]:
+        all_results.sort(key=lambda x: x.get("original_row_idx", 0))
+        print("✓ Sorted by original_row_idx")
 
     # Save in requested format
     output_path = Path(output_file)
@@ -86,12 +123,24 @@ def merge_batches(checkpoint_dir: str, output_file: str, output_format: str = "c
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Merge batch outputs")
+    parser = argparse.ArgumentParser(description="Merge batch outputs from batched extraction")
     parser.add_argument(
         "--checkpoint-dir",
         type=str,
         default="./checkpoints",
         help="Checkpoint directory",
+    )
+    parser.add_argument(
+        "--short-batches-dir",
+        type=str,
+        default=None,
+        help="Short batches directory (default: checkpoint-dir/short_batches)",
+    )
+    parser.add_argument(
+        "--long-batches-dir",
+        type=str,
+        default=None,
+        help="Long batches directory (default: checkpoint-dir/long_batches)",
     )
     parser.add_argument("-o", "--output", type=str, required=True, help="Output file")
     parser.add_argument(
@@ -105,5 +154,11 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    total = merge_batches(args.checkpoint_dir, args.output, args.format)
+    total = merge_batches(
+        args.checkpoint_dir,
+        args.output,
+        args.format,
+        short_batches_dir=args.short_batches_dir,
+        long_batches_dir=args.long_batches_dir,
+    )
     print(f"\n✓ Merged {total} results")

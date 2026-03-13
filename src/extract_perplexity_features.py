@@ -192,6 +192,13 @@ try:
 except ImportError:
     DATASETS_AVAILABLE = False
 
+try:
+    from src.long_text_strategies import get_strategy
+
+    LONG_TEXT_STRATEGIES_AVAILABLE = True
+except ImportError:
+    LONG_TEXT_STRATEGIES_AVAILABLE = False
+
 
 @dataclass
 class TokenPerplexity:
@@ -269,6 +276,7 @@ class HuggingFaceLanguageModel(LanguageModel):
         trust_remote_code: bool = False,
         max_tokens: Optional[int] = None,
         padding_strategy: str = "sliding_window",
+        long_text_strategy: str = "immediate_context",
     ):
         """
         Initialize HuggingFace model.
@@ -278,7 +286,9 @@ class HuggingFaceLanguageModel(LanguageModel):
             device: Device to use ('cpu', 'cuda', 'mps')
             trust_remote_code: Trust remote code for custom models
             max_tokens: Maximum tokens per pass (default: model's max_position_embeddings)
-            padding_strategy: How to handle long texts ('truncate', 'sliding_window')
+            padding_strategy: How to handle long texts ('truncate', 'sliding_window') - DEPRECATED
+            long_text_strategy: Strategy for texts exceeding max_tokens
+                ('immediate_context', 'sliding_window', 'truncate')
         """
         if not HF_AVAILABLE:
             raise ImportError(
@@ -290,6 +300,7 @@ class HuggingFaceLanguageModel(LanguageModel):
         self.model_name = model_name
         self.device = device
         self.padding_strategy = padding_strategy
+        self.long_text_strategy_name = long_text_strategy
 
         print(f"Loading model: {model_name}...")
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -320,9 +331,17 @@ class HuggingFaceLanguageModel(LanguageModel):
         else:
             self.max_tokens = max_tokens
 
+        # Initialize long-text strategy
+        if LONG_TEXT_STRATEGIES_AVAILABLE:
+            self.long_text_strategy = get_strategy(long_text_strategy)
+        else:
+            self.long_text_strategy = None
+
         print(f"✓ Model loaded on {device}")
         print(f"  Max tokens per pass: {self.max_tokens}")
         print(f"  Padding strategy: {padding_strategy}")
+        if LONG_TEXT_STRATEGIES_AVAILABLE:
+            print(f"  Long-text strategy: {long_text_strategy}")
 
     def _compute_chunk_perplexities(
         self, input_ids: torch.Tensor, start_idx: int, top_k: int, context_window: int
@@ -421,7 +440,7 @@ class HuggingFaceLanguageModel(LanguageModel):
         inputs = self.tokenizer(text, return_tensors="pt")
         input_ids = inputs["input_ids"][0]
 
-        # Check if we need to use sliding window
+        # Check if we need to use long-text strategy
         if len(input_ids) <= self.max_tokens:
             # Text fits in one pass
             token_perplexities = self._compute_chunk_perplexities(
@@ -430,45 +449,67 @@ class HuggingFaceLanguageModel(LanguageModel):
                 top_k=top_k,
                 context_window=context_window,
             )
+            strategy_metadata = None
         else:
-            # Use sliding window strategy
-            if self.padding_strategy == "truncate":
-                # Simple truncation
-                truncated_ids = input_ids[: self.max_tokens]
-                token_perplexities = self._compute_chunk_perplexities(
-                    input_ids=truncated_ids,
-                    start_idx=0,
+            # Use long-text strategy
+            if LONG_TEXT_STRATEGIES_AVAILABLE and self.long_text_strategy is not None:
+                # Use the new strategy system
+                strategy_result = self.long_text_strategy.process_long_text(
+                    model=self,
+                    tokenizer=self.tokenizer,
+                    input_ids=input_ids,
+                    text=text,
+                    max_tokens=self.max_tokens,
                     top_k=top_k,
                     context_window=context_window,
                 )
-
-            elif self.padding_strategy == "sliding_window":
-                # Non-overlapping sliding window
-                # Ensures every token gets perplexity with maximum context
-                token_perplexities = []
-
-                # Process in non-overlapping windows
-                position = 0
-                while position < len(input_ids):
-                    # Determine window size
-                    window_end = min(position + self.max_tokens, len(input_ids))
-                    chunk_ids = input_ids[position:window_end]
-
-                    # Compute perplexities for this chunk
-                    chunk_perplexities = self._compute_chunk_perplexities(
-                        input_ids=chunk_ids,
-                        start_idx=position,
+                token_perplexities = [
+                    TokenPerplexity(**t) if isinstance(t, dict) else t
+                    for t in strategy_result["tokens"]
+                ]
+                strategy_metadata = strategy_result.get("metadata", {})
+            else:
+                # Fallback to old padding_strategy for backwards compatibility
+                if self.padding_strategy == "truncate":
+                    # Simple truncation
+                    truncated_ids = input_ids[: self.max_tokens]
+                    token_perplexities = self._compute_chunk_perplexities(
+                        input_ids=truncated_ids,
+                        start_idx=0,
                         top_k=top_k,
                         context_window=context_window,
                     )
+                    strategy_metadata = None
 
-                    token_perplexities.extend(chunk_perplexities)
+                elif self.padding_strategy == "sliding_window":
+                    # Non-overlapping sliding window
+                    # Ensures every token gets perplexity with maximum context
+                    token_perplexities = []
 
-                    # Move to next non-overlapping window
-                    position = window_end
+                    # Process in non-overlapping windows
+                    position = 0
+                    while position < len(input_ids):
+                        # Determine window size
+                        window_end = min(position + self.max_tokens, len(input_ids))
+                        chunk_ids = input_ids[position:window_end]
 
-            else:
-                raise ValueError(f"Unknown padding strategy: {self.padding_strategy}")
+                        # Compute perplexities for this chunk
+                        chunk_perplexities = self._compute_chunk_perplexities(
+                            input_ids=chunk_ids,
+                            start_idx=position,
+                            top_k=top_k,
+                            context_window=context_window,
+                        )
+
+                        token_perplexities.extend(chunk_perplexities)
+
+                        # Move to next non-overlapping window
+                        position = window_end
+
+                    strategy_metadata = None
+
+                else:
+                    raise ValueError(f"Unknown padding strategy: {self.padding_strategy}")
 
         # Compute aggregate statistics
         if token_perplexities:
@@ -496,6 +537,10 @@ class HuggingFaceLanguageModel(LanguageModel):
                 "std_entropy": 0.0,
                 "total_tokens": 0,
             }
+
+        # Add strategy metadata if available
+        if strategy_metadata:
+            aggregate.update(strategy_metadata)
 
         return TextPerplexityResult(
             text=text,
@@ -781,6 +826,7 @@ def load_model(
             trust_remote_code=kwargs.get("trust_remote_code", False),
             max_tokens=kwargs.get("max_tokens"),
             padding_strategy=kwargs.get("padding_strategy", "sliding_window"),
+            long_text_strategy=kwargs.get("long_text_strategy", "immediate_context"),
         )
     elif model_type == "pytorch":
         return PyTorchLanguageModel(
@@ -1025,6 +1071,13 @@ def main():  # noqa: C901
         default="sliding_window",
         help="Strategy for handling long texts (default: sliding_window)",
     )
+    parser.add_argument(
+        "--long-text-strategy",
+        type=str,
+        choices=["immediate_context", "sliding_window", "truncate"],
+        default="immediate_context",
+        help="Strategy for texts exceeding max_tokens (default: immediate_context)",
+    )
 
     # Output configuration
     parser.add_argument(
@@ -1076,6 +1129,7 @@ def main():  # noqa: C901
             trust_remote_code=args.trust_remote_code,
             max_tokens=args.max_tokens,
             padding_strategy=args.padding_strategy,
+            long_text_strategy=args.long_text_strategy,
         )
     except Exception as e:
         parser.error(f"Failed to load model: {e}")
