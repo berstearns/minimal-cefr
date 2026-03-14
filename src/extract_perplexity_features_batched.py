@@ -164,7 +164,19 @@ def main():
     parser.add_argument(
         "--aggregate-only",
         action="store_true",
-        help="Save only aggregate statistics",
+        help="Flatten to aggregate stats in final output (batch JSONs always keep per-token data)",
+    )
+
+    # GPU optimization
+    parser.add_argument(
+        "--mixed-precision",
+        action="store_true",
+        help="Use FP16 mixed precision inference (requires CUDA)",
+    )
+    parser.add_argument(
+        "--torch-compile",
+        action="store_true",
+        help="Apply torch.compile() optimization to model",
     )
 
     # Other
@@ -183,6 +195,8 @@ def main():
         model_name_or_path=args.model,
         device=args.device,
         long_text_strategy=args.long_text_strategy,
+        mixed_precision=args.mixed_precision,
+        torch_compile=args.torch_compile,
     )
 
     print(f"Creating batches from {args.input}...")
@@ -215,22 +229,18 @@ def main():
                 context_window=args.context_window,
             )
 
-            # Filter for aggregate-only if requested
-            if args.aggregate_only:
-                results = [
-                    {
-                        "text": r["text"],
-                        "model": r["model"],
-                        "original_row_idx": r.get("original_row_idx"),
-                        **r["aggregate"],
-                    }
-                    for r in results
-                ]
-
             batch_processor.save_batch(batch_idx, results, batch_type="short")
-            print(f"  Saved {len(results)} results")
+            print(f"  Saved {len(results)} results (per-token + aggregate)")
     else:
         print("Skipping short texts")
+
+    # Free GPU memory between short and long text processing
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
 
     # Process long texts
     if not args.skip_long_texts:
@@ -255,20 +265,8 @@ def main():
                 context_window=args.context_window,
             )
 
-            # Filter for aggregate-only if requested
-            if args.aggregate_only:
-                results = [
-                    {
-                        "text": r["text"],
-                        "model": r["model"],
-                        "original_row_idx": r.get("original_row_idx"),
-                        **r["aggregate"],
-                    }
-                    for r in results
-                ]
-
             batch_processor.save_batch(batch_idx, results, batch_type="long")
-            print(f"  Saved {len(results)} results")
+            print(f"  Saved {len(results)} results (per-token + aggregate)")
     else:
         print("Skipping long texts")
 
@@ -277,6 +275,28 @@ def main():
         print(f"\nMerging batches...")
         total = batch_processor.merge_batches(args.output)
         print(f"✓ Merged {total} results -> {args.output}")
+
+        # Flatten to aggregate-only for final output if requested
+        # (batch JSONs always keep full per-token data for analysis)
+        if args.aggregate_only:
+            print("Flattening to aggregate-only for output...")
+            with open(args.output) as f:
+                all_results = json.load(f)
+            flat_results = []
+            for r in all_results:
+                if "aggregate" in r:
+                    flat_results.append({
+                        "text": r["text"],
+                        "model": r["model"],
+                        "original_row_idx": r.get("original_row_idx"),
+                        **r["aggregate"],
+                    })
+                else:
+                    # Already flat (from older aggregate-only batches)
+                    flat_results.append(r)
+            with open(args.output, 'w') as f:
+                json.dump(flat_results, f, indent=2)
+            print(f"  Flattened {len(flat_results)} results")
 
         # Convert format if needed
         if args.save_format != "json":

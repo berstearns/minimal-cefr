@@ -74,6 +74,7 @@ class BatchProcessor:
             if "short_texts" not in metadata:
                 metadata["short_texts"] = {}
             metadata["short_texts"]["last_completed_batch"] = batch_idx
+            metadata["short_texts"]["completed_batches"] = batch_idx + 1
             metadata["short_texts"]["num_completed_batches"] = batch_idx + 1
             completed = batch_idx + 1
             total = metadata["short_texts"].get("total_batches", "?")
@@ -81,6 +82,7 @@ class BatchProcessor:
             if "long_texts" not in metadata:
                 metadata["long_texts"] = {}
             metadata["long_texts"]["last_completed_batch"] = batch_idx
+            metadata["long_texts"]["completed_batches"] = batch_idx + 1
             metadata["long_texts"]["num_completed_batches"] = batch_idx + 1
             completed = batch_idx + 1
             total = metadata["long_texts"].get("total_batches", "?")

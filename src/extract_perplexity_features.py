@@ -277,6 +277,8 @@ class HuggingFaceLanguageModel(LanguageModel):
         max_tokens: Optional[int] = None,
         padding_strategy: str = "sliding_window",
         long_text_strategy: str = "immediate_context",
+        mixed_precision: bool = False,
+        torch_compile: bool = False,
     ):
         """
         Initialize HuggingFace model.
@@ -289,6 +291,8 @@ class HuggingFaceLanguageModel(LanguageModel):
             padding_strategy: How to handle long texts ('truncate', 'sliding_window') - DEPRECATED
             long_text_strategy: Strategy for texts exceeding max_tokens
                 ('immediate_context', 'sliding_window', 'truncate')
+            mixed_precision: Use FP16 mixed precision inference (requires CUDA)
+            torch_compile: Apply torch.compile() optimization to model
         """
         if not HF_AVAILABLE:
             raise ImportError(
@@ -301,6 +305,7 @@ class HuggingFaceLanguageModel(LanguageModel):
         self.device = device
         self.padding_strategy = padding_strategy
         self.long_text_strategy_name = long_text_strategy
+        self.mixed_precision = mixed_precision and device == "cuda"
 
         print(f"Loading model: {model_name}...")
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -310,6 +315,10 @@ class HuggingFaceLanguageModel(LanguageModel):
             model_name, trust_remote_code=trust_remote_code
         ).to(device)
         self.model.eval()
+
+        if torch_compile:
+            print("  Applying torch.compile()...")
+            self.model = torch.compile(self.model)
 
         # Set pad token if not available
         if self.tokenizer.pad_token is None:
@@ -340,6 +349,8 @@ class HuggingFaceLanguageModel(LanguageModel):
         print(f"✓ Model loaded on {device}")
         print(f"  Max tokens per pass: {self.max_tokens}")
         print(f"  Padding strategy: {padding_strategy}")
+        print(f"  Mixed precision (FP16): {'ENABLED' if self.mixed_precision else 'disabled'}")
+        print(f"  torch.compile: {'ENABLED' if torch_compile else 'disabled'}")
         if LONG_TEXT_STRATEGIES_AVAILABLE:
             print(f"  Long-text strategy: {long_text_strategy}")
 
@@ -361,10 +372,15 @@ class HuggingFaceLanguageModel(LanguageModel):
         token_perplexities = []
 
         with torch.no_grad():
-            # Get model outputs
+            # Get model outputs (with optional mixed precision)
             inputs = {"input_ids": input_ids.unsqueeze(0).to(self.device)}
-            outputs = self.model(**inputs, labels=inputs["input_ids"])
-            logits = outputs.logits[0]  # [seq_len, vocab_size]
+            if self.mixed_precision:
+                with torch.amp.autocast("cuda", dtype=torch.float16):
+                    outputs = self.model(**inputs, labels=inputs["input_ids"])
+                logits = outputs.logits[0].float()  # Cast to FP32 for numerical precision
+            else:
+                outputs = self.model(**inputs, labels=inputs["input_ids"])
+                logits = outputs.logits[0]  # [seq_len, vocab_size]
 
             # Process each token (skip first token as it has no previous context)
             for i in range(1, len(input_ids)):
@@ -827,6 +843,8 @@ def load_model(
             max_tokens=kwargs.get("max_tokens"),
             padding_strategy=kwargs.get("padding_strategy", "sliding_window"),
             long_text_strategy=kwargs.get("long_text_strategy", "immediate_context"),
+            mixed_precision=kwargs.get("mixed_precision", False),
+            torch_compile=kwargs.get("torch_compile", False),
         )
     elif model_type == "pytorch":
         return PyTorchLanguageModel(
@@ -1079,6 +1097,18 @@ def main():  # noqa: C901
         help="Strategy for texts exceeding max_tokens (default: immediate_context)",
     )
 
+    # GPU optimization
+    parser.add_argument(
+        "--mixed-precision",
+        action="store_true",
+        help="Use FP16 mixed precision inference (requires CUDA)",
+    )
+    parser.add_argument(
+        "--torch-compile",
+        action="store_true",
+        help="Apply torch.compile() optimization to model",
+    )
+
     # Output configuration
     parser.add_argument(
         "-o", "--output", type=str, required=True, help="Output file path"
@@ -1130,6 +1160,8 @@ def main():  # noqa: C901
             max_tokens=args.max_tokens,
             padding_strategy=args.padding_strategy,
             long_text_strategy=args.long_text_strategy,
+            mixed_precision=args.mixed_precision,
+            torch_compile=args.torch_compile,
         )
     except Exception as e:
         parser.error(f"Failed to load model: {e}")
